@@ -17,6 +17,9 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -64,6 +67,8 @@ fun PlayerScreen() {
     var playing by remember { mutableStateOf(false) }
     var pos by remember { mutableLongStateOf(0L) }
     var coverFor by remember { mutableIntStateOf(-1) }
+    var coverMenu by remember { mutableIntStateOf(-1) }
+    var dz by remember { mutableStateOf<Int?>(null) } // null=cerrado, -1=buscar canciones, >=0=portada de esa pista
 
     val notif = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     LaunchedEffect(Unit) { if (Build.VERSION.SDK_INT >= 33) notif.launch(Manifest.permission.POST_NOTIFICATIONS) }
@@ -94,23 +99,45 @@ fun PlayerScreen() {
             Store.save(ctx, tracks)
         }
     }
+    fun applyCover(i: Int, bytes: ByteArray) {
+        if (i !in tracks.indices) return
+        val path = saveCover(ctx, bytes) ?: return
+        tracks[i].cover?.let { File(it).delete() }
+        val nt = tracks[i].copy(cover = path); tracks[i] = nt
+        Store.save(ctx, tracks)
+        ctrl?.let { c ->
+            val p = c.currentPosition; val isCur = c.currentMediaItemIndex == i
+            c.replaceMediaItem(i, mediaItem(nt)); if (isCur) c.seekTo(i, p)
+        }
+    }
     val coverPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u ->
-        val i = coverFor
-        if (u != null && i in tracks.indices) {
-            val path = ctx.contentResolver.openInputStream(u)?.use { it.readBytes() }?.let { saveCover(ctx, it) }
-            if (path != null) {
-                tracks[i].cover?.let { File(it).delete() }
-                val nt = tracks[i].copy(cover = path); tracks[i] = nt
-                Store.save(ctx, tracks)
-                ctrl?.let { c ->
-                    val p = c.currentPosition; val isCur = c.currentMediaItemIndex == i
-                    c.replaceMediaItem(i, mediaItem(nt)); if (isCur) c.seekTo(i, p)
+        if (u != null) ctx.contentResolver.openInputStream(u)?.use { it.readBytes() }?.let { applyCover(coverFor, it) }
+    }
+    fun pickCover(i: Int) { coverMenu = i }
+    fun remove(i: Int) { tracks.removeAt(i).cover?.let { File(it).delete() }; ctrl?.removeMediaItem(i); Store.save(ctx, tracks) }
+
+    if (coverMenu >= 0) AlertDialog(onDismissRequest = { coverMenu = -1 }, title = { Text("Elegir portada") },
+        confirmButton = { TextButton({
+            coverFor = coverMenu; coverMenu = -1
+            coverPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }) { Text("Galería") } },
+        dismissButton = { TextButton({ dz = coverMenu; coverMenu = -1 }) { Text("Deezer") } })
+    dz?.let { target ->
+        val q = if (target >= 0) tracks.getOrNull(target)?.let { t ->
+            if (t.artist.startsWith("Artista")) t.title else "${t.title} ${t.artist.substringBefore(" · ")}"
+        } ?: "" else ""
+        DeezerDialog(q, target >= 0, onDismiss = { dz = null }) { d ->
+            dz = null
+            scope.launch {
+                val bytes = withContext(Dispatchers.IO) { Deezer.download(d.coverBig) }
+                if (target >= 0) { if (bytes != null) applyCover(target, bytes) }
+                else if (d.preview.isNotEmpty()) {
+                    val t = Track(d.preview, d.title, d.artist + " · Deezer (preview 30 s)", 30000L, bytes?.let { saveCover(ctx, it) })
+                    tracks.add(t); ctrl?.addMediaItem(mediaItem(t))
                 }
             }
         }
     }
-    fun pickCover(i: Int) { coverFor = i; coverPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-    fun remove(i: Int) { tracks.removeAt(i).cover?.let { File(it).delete() }; ctrl?.removeMediaItem(i); Store.save(ctx, tracks) }
 
     val cur = tracks.getOrNull(idx)
     val curBmp by produceState<Bitmap?>(null, cur?.cover) {
@@ -124,6 +151,7 @@ fun PlayerScreen() {
         Column(Modifier.fillMaxSize().systemBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("GlassPlayer", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton({ dz = -1 }) { Icon(Icons.Default.Search, "Buscar en Deezer", tint = Color.White) }
                 IconButton({ addPicker.launch(arrayOf("audio/mpeg", "audio/*")) }) { Icon(Icons.Default.Add, "Añadir MP3", tint = MaterialTheme.colorScheme.primary) }
             }
             if (tracks.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -196,4 +224,56 @@ fun GlassPlayer(t: Track, bg: Bitmap?, playing: Boolean, pos: Long, c: MediaCont
             }
         }
     }
+}
+
+@Composable
+fun UrlThumb(url: String, size: Dp) {
+    val bmp by produceState<Bitmap?>(null, url) {
+        value = withContext(Dispatchers.IO) { Deezer.download(url)?.let { BitmapFactory.decodeByteArray(it, 0, it.size) } }
+    }
+    Box(Modifier.size(size).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(.12f))) {
+        bmp?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+    }
+}
+
+@Composable
+fun DeezerDialog(initial: String, forCover: Boolean, onDismiss: () -> Unit, onPick: (DzTrack) -> Unit) {
+    var q by remember { mutableStateOf(initial) }
+    var results by remember { mutableStateOf<List<DzTrack>>(emptyList()) }
+    var status by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    fun search() {
+        if (q.isBlank()) return
+        scope.launch {
+            status = "Buscando…"
+            val r = withContext(Dispatchers.IO) { runCatching { Deezer.search(q) }.getOrNull() }
+            if (r == null) status = "Sin conexión o error de Deezer"
+            else { results = r; status = if (r.isEmpty()) "Sin resultados" else "" }
+        }
+    }
+    LaunchedEffect(Unit) { if (initial.isNotBlank()) search() }
+    AlertDialog(onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onDismiss) { Text("Cerrar") } },
+        title = { Text(if (forCover) "Portada desde Deezer" else "Buscar en Deezer") },
+        text = {
+            Column {
+                OutlinedTextField(q, { q = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { search() }))
+                if (status.isNotEmpty()) Text(status, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                if (!forCover) Text("Deezer solo permite previews de 30 s", fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                    items(results) { d ->
+                        Row(Modifier.fillMaxWidth().clickable { onPick(d) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            UrlThumb(d.coverSmall, 48.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text(d.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(d.artist, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+            }
+        })
 }

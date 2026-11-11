@@ -27,7 +27,7 @@ object Store {
     }
     fun save(c: Context, l: List<Track>) {
         val a = JSONArray()
-        l.forEach { a.put(JSONObject().put("u", it.uri).put("t", it.title).put("a", it.artist).put("d", it.durationMs).put("c", it.cover ?: "")) }
+        l.filter { !it.uri.startsWith("http") }.forEach { a.put(JSONObject().put("u", it.uri).put("t", it.title).put("a", it.artist).put("d", it.durationMs).put("c", it.cover ?: "")) }
         prefs(c).edit().putString("tracks", a.toString()).apply()
     }
 }
