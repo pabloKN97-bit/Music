@@ -1,19 +1,26 @@
 # GlassPlayer para Ubuntu
 
-Versión de escritorio (GTK4 + GStreamer) con la misma estética Apple Music "glass": portada desenfocada de fondo, tarjetas translúcidas con borde brillante.
+Reproductor (GTK4 + GStreamer) con estética Apple Music "glass": degradado gris, portada desenfocada de fondo, paneles translúcidos con brillo superior y acento coral `#ff5d8f`.
 
-## Instalar
+## Instalar y ejecutar
 ```bash
 cd desktop && ./install.sh
 glassplayer
 ```
-Sin instalar: `sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly gstreamer1.0-libav python3-mutagen` y luego `python3 -m glassplayer` dentro de `desktop/`.
+El instalador también deja GlassPlayer **fijado en la barra de tareas** (dock). Clic derecho sobre su icono: Reproducir/Pausa, Siguiente, Anterior y Salir. Si lo cierras mientras suena, la música sigue en segundo plano y se controla desde ese menú o desde la pantalla de bloqueo.
+
+Sin instalar: instala las dependencias de `install.sh` con apt y ejecuta `python3 -m glassplayer` dentro de `desktop/`.
+
+## Uso
+- **Canciones**: tus MP3 (botón **+** de la barra superior). **Favoritos**: pulsa el corazón de cualquier fila.
+- **Listas**: escribe un nombre en "Nueva lista…" (barra lateral). Menú **⋯** de cada fila: añadir a una lista, quitar, eliminar.
+- **YouTube**: escribe en el buscador superior y pulsa Intro. Se reproduce en streaming, sin guardar audio, y la miniatura del vídeo se usa como portada. Con **⋯ → Añadir a la biblioteca** (o con el corazón) se guarda el enlace.
+- **Portada**: haz clic en la portada de la barra inferior para elegir una imagen.
+
+## YouTube
+Usa `yt-dlp`. Si deja de funcionar: `yt-dlp -U`. Las versiones recientes pueden pedir un runtime de JavaScript (deno o nodejs; el instalador pone nodejs); consulta la documentación de yt-dlp si te lo indica. Úsalo con contenido que tengas derecho a reproducir (p. ej. tu propio canal).
 
 ## Pantalla de bloqueo
-La app publica la canción por MPRIS (D-Bus). GNOME muestra título, artista, portada y controles en la pantalla de bloqueo y en el menú del sistema, y responde a las teclas multimedia. La pantalla de bloqueo la dibuja GNOME Shell: ninguna aplicación puede pintar su propia interfaz encima, así que el aspecto lo decide GNOME. El estilo glass completo solo es posible dentro de la ventana de la app.
-
-## Deezer
-API pública, sin claves ni anuncios. Permite buscar canciones y álbumes, usar portadas en alta resolución y añadir previews de 30 s (un álbum entero añade las previews de todas sus pistas). La API no ofrece canciones completas.
-Las previews no se guardan entre sesiones (sus URLs caducan); las portadas descargadas sí.
+La canción se publica por MPRIS: GNOME muestra título, artista, portada y controles al bloquear y responde a las teclas multimedia. Esa pantalla la dibuja GNOME Shell, así que su aspecto lo decide el sistema.
 
 Datos en `~/.local/share/glassplayer/`.
