@@ -1,4 +1,4 @@
-"""Biblioteca local: etiquetas MP3, portadas y persistencia en ~/.local/share/glassplayer."""
+"""Biblioteca: etiquetas MP3, portadas, listas de canciones y favoritos en ~/.local/share/glassplayer."""
 import json
 import os
 import time
@@ -64,17 +64,23 @@ def read_track(path):
 
 
 def load():
+    """Devuelve {"tracks": [...], "playlists": {nombre: [uri]}, "favorites": [uri]}."""
     try:
         with open(LIB, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     except Exception:
-        return []
+        data = {}
+    if isinstance(data, list):  # formato antiguo: solo la lista de pistas
+        data = {"tracks": data}
+    data.setdefault("tracks", [])
+    data.setdefault("playlists", {})
+    data.setdefault("favorites", [])
+    return data
 
 
-def save(tracks):
-    """Las previews de Deezer (http) no se guardan: sus URLs caducan."""
+def save(lib):
     with open(LIB, "w", encoding="utf-8") as f:
-        json.dump([t for t in tracks if t["uri"].startswith("file:")], f, ensure_ascii=False)
+        json.dump(lib, f, ensure_ascii=False)
 
 
 def drop_cover(path, tracks):
