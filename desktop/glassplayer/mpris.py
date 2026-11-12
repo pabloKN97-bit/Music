@@ -70,12 +70,12 @@ class Mpris:
 
     def _player_props(self):
         a = self.app
-        n = len(a.tracks)
+        n = len(a.queue)
         status = "Playing" if a.playing else ("Paused" if a.current() else "Stopped")
         return {"PlaybackStatus": V("s", status), "Metadata": V("a{sv}", self._metadata()),
                 "Position": V("x", a.position_us()), "Rate": V("d", 1.0), "MinimumRate": V("d", 1.0),
                 "MaximumRate": V("d", 1.0), "Volume": V("d", 1.0),
-                "CanGoNext": V("b", n > 1), "CanGoPrevious": V("b", n > 1), "CanPlay": V("b", n > 0),
+                "CanGoNext": V("b", n > 1), "CanGoPrevious": V("b", n > 1), "CanPlay": V("b", bool(a.queue or a.lib["tracks"])),
                 "CanPause": V("b", True), "CanSeek": V("b", True), "CanControl": V("b", True)}
 
     def _root_props(self):
@@ -99,6 +99,7 @@ class Mpris:
             elif method == "Stop": a.stop()
             elif method == "Seek": a.seek_rel(params.unpack()[0])
         elif method == "Raise":
+            a.win.set_visible(True)
             a.win.present()
         elif method == "Quit":
             a.quit()
