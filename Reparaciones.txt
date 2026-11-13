@@ -1,4 +1,7 @@
-Añadir paleta de colores para personalizar los colores de la app y posibilidad de añadir un fondo desde el dispositivo
+Quiero un boton para personalizar el estilo, este contendra:
+- Añadir paleta de colores para personalizar los colores de la app y posibilidad de añadir un fondo desde el dispositivo
+- el nivel de transparencia de la pagina pudiendo asi ver el fondo de las otras ventanas del ordenador o lo que haya por debajo
+
 añadir la posibilidad de cambiar el tamaño de venta a ventana movil donde te saldra en una ventana con el estilo de ventana de un movil donde se vera la portada de la cancion, nombre de la cancion un boton para cancion previa, otro para siguiente cancion y el de pausa, y en la esquina superior el boton para volver a modo deskop
 añadir un boton que descargue las canciones
 el procedimiento de esto debe ser todo por debajo del usuario en el linux con la extraccion del enlace de la cancion
