@@ -8,7 +8,7 @@ Secundario
 - reparar que al salir de la app no cierre la musica, las canciones de la barra de tareas
 - añadir cola de canciones 
 -cambiar buscador, si este es pinchado desde cualquier lista que te cambie a la lista youtube y te muestre los resultados de la busqueda
-
+- añadir boton para añadir canciones directamente en las listas creadas
 
 
 No desarrollar aun 
