@@ -1,5 +1,5 @@
 PRIORITARIO
-
+-Que al pinchar una cancion no se suba al inicio de la app, si no que la interfaz de visualizacion del usuario permanezca donde estaba
 Secundario
 -Crear la lista que sale al inicio, que sean las ultimas canciones escuchadas en orden
 -definir lo de transparencia
