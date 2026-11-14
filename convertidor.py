@@ -1,6 +1,8 @@
 """Requisitos: Python 3.9+, ffmpeg instalado en el sistema.
-Instalar:   pip install -r requirements.txt
-Ejecutar:   python app.py   y abrir http://127.0.0.1:5000
+Instalar:   pip install flask yt-dlp
+Ejecutar:   python convertidor.py   y abrir http://127.0.0.1:5000
+GlassPlayer (escritorio) lo lanza solo en segundo plano, en un puerto libre que le pasa con la
+variable de entorno CONVERTIDOR_PORT, y le envía los enlaces de las canciones a /convert.
 """
 import os
 import re
@@ -12,6 +14,24 @@ from flask import Flask, jsonify, request, send_file, render_template_string
 import yt_dlp
 
 app = Flask(__name__)
+
+HTML = """<!doctype html><meta charset="utf-8"><title>Convertidor MP3</title>
+<body style="font-family:sans-serif;max-width:560px;margin:3em auto">
+<h2>YouTube &rarr; MP3</h2>
+<input id="u" placeholder="https://www.youtube.com/watch?v=..." style="width:100%;padding:8px">
+<p><button id="b" style="padding:8px 16px">Convertir</button> <span id="m"></span></p>
+<script>
+document.getElementById("b").onclick = async () => {
+  const m = document.getElementById("m"); m.textContent = "Convirtiendo...";
+  const r = await fetch("/convert", {method: "POST", headers: {"Content-Type": "application/json"},
+                                     body: JSON.stringify({url: document.getElementById("u").value})});
+  if (!r.ok) { m.textContent = (await r.json()).error; return; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(await r.blob());
+  a.download = decodeURIComponent(r.headers.get("X-Filename") || "audio.mp3");
+  a.click(); m.textContent = "Listo";
+};
+</script></body>"""
 
 ALLOWED_HOSTS = {
     "youtube.com", "www.youtube.com", "m.youtube.com",
@@ -54,6 +74,8 @@ def convert():
         "format": "bestaudio/best",
         "outtmpl": os.path.join(tmp, "%(id)s.%(ext)s"),
         "noplaylist": True,
+        # yt-dlp solo activa deno por defecto; también se admite node (lo instala install.sh)
+        "js_runtimes": {"deno": {}, "node": {}},
         "quiet": True,
         "no_warnings": True,
         "postprocessors": [{
@@ -83,4 +105,4 @@ def convert():
 
 if __name__ == "__main__":
     # Solo accesible desde tu propio equipo
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    app.run(host="127.0.0.1", port=int(os.environ.get("CONVERTIDOR_PORT", "5000")), debug=False)
