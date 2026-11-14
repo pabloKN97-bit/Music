@@ -7,7 +7,7 @@ Reproductor (GTK4 + GStreamer) con estética Apple Music "glass": degradado gris
 cd desktop && ./install.sh
 glassplayer
 ```
-El instalador también deja GlassPlayer **fijado en la barra de tareas** (dock). Clic derecho sobre su icono: Reproducir/Pausa, Siguiente, Anterior y Salir. Si lo cierras mientras suena, la música sigue en segundo plano y se controla desde ese menú o desde la pantalla de bloqueo.
+El instalador también deja GlassPlayer **fijado en la barra de tareas** (dock). Clic derecho sobre su icono: Reproducir/Pausa, Siguiente, Anterior y Salir. Si cierras la ventana (la X) mientras suena, la música sigue en segundo plano y se controla desde la barra superior, el panel del sistema o la pantalla de bloqueo (la primera vez avisa con una notificación). Se vuelve a abrir desde el dock o desde el icono de la barra superior. **Para salir del todo** (y detener la música): botón **Salir** de la barra superior de la app, **Ctrl+Q**, o «Salir» en el icono. Con la música en pausa, la X sí cierra la app.
 
 Sin instalar: instala las dependencias de `install.sh` con apt y ejecuta `python3 -m glassplayer` dentro de `desktop/`.
 
@@ -35,13 +35,19 @@ Todo ocurre en segundo plano y con tus permisos de usuario: la app toma el enlac
 
 ## Barra de tareas y barra superior
 - **Icono fijado en el dock**: clic derecho → Reproducir/Pausa, Siguiente, Anterior, Salir.
-- **Icono en la barra superior** (junto al reloj): muestra el **nombre de la canción** y su menú tiene **Anterior · Pausa/Reproducir · Siguiente**, Abrir y Salir; el clic central pausa/reanuda. Lo lanza la app sola (`tray.py`, proceso aparte con AppIndicator) y desaparece al cerrarla. En Ubuntu funciona de serie; en GNOME "puro" hace falta la extensión *AppIndicator and KStatusNotifierItem Support*. Para desactivarlo: `GLASSPLAYER_NO_TRAY=1 glassplayer`.
-- El dock de GNOME no permite mostrar texto ni botones propios en el icono; por eso el título y los controles viven en la barra superior (y también en el menú del sistema y la pantalla de bloqueo, vía MPRIS).
+- **Barra superior estilo Spotify** (junto al reloj): el **nombre de la canción** y, a su lado, tres botones de **un solo clic**: ⏮ Anterior · ⏯ Pausa/Reproducir (el icono cambia solo) · ⏭ Siguiente. No hace falta abrir ningún menú. El nombre también tiene menú (Abrir, Salir) y el clic central pausa/reanuda. Al pasar el ratón por un botón se ve la canción actual.
+- **Título de la ventana** = «Canción — Artista» (como Spotify): se ve en el dock, en Actividades y en Alt+Tab.
+- Lo lanza la app sola (`tray.py`, proceso aparte) y desaparece al cerrarla. En Ubuntu funciona de serie; en GNOME "puro" hace falta la extensión *AppIndicator and KStatusNotifierItem Support*. GNOME coloca cada icono nuevo a la izquierda del anterior; si en tu equipo el orden sale distinto, no afecta al funcionamiento. Para desactivar solo los botones: `GLASSPLAYER_NO_TRAY_BUTTONS=1 glassplayer`; todo el icono: `GLASSPLAYER_NO_TRAY=1 glassplayer`.
+- El dock de GNOME no permite mostrar texto ni botones propios en el icono; por eso el título y los botones viven en la barra superior (y también en el menú del sistema y la pantalla de bloqueo, vía MPRIS).
 
 ## YouTube
 Usa `yt-dlp`. Si deja de funcionar: `yt-dlp -U`. Las versiones recientes pueden pedir un runtime de JavaScript (deno o nodejs; el instalador pone nodejs); consulta la documentación de yt-dlp si te lo indica. Úsalo con contenido que tengas derecho a reproducir (p. ej. tu propio canal).
 
-## Pantalla de bloqueo
-La canción se publica por MPRIS: GNOME muestra título, artista, portada y controles al bloquear y responde a las teclas multimedia. Esa pantalla la dibuja GNOME Shell, así que su aspecto lo decide el sistema.
+## Panel multimedia del sistema y pantalla de bloqueo
+La canción se publica por MPRIS: GNOME muestra **una sola tarjeta con la canción que suena** (título, artista, portada y botones Anterior / Pausa / Siguiente) en el menú del sistema y al bloquear, y responde a las teclas multimedia.
+- Los botones Anterior/Siguiente están siempre disponibles mientras suena algo (con una sola canción en la lista la reinician); antes GNOME los ocultaba.
+- La portada es la de la canción; si es de YouTube y aún no tiene portada guardada se usa su miniatura, y si no hay ninguna, el icono de la app.
+- La pista tiene un identificador estable (ya no depende de su posición en la lista) y la app nunca publica la lista de canciones, solo la actual.
+Esa pantalla la dibuja GNOME Shell, así que su aspecto lo decide el sistema.
 
 Datos en `~/.local/share/glassplayer/` (biblioteca, portadas, fondos, ajustes). Descargas en `~/Música/GlassPlayer/`.

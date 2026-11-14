@@ -53,6 +53,7 @@ class App(Gtk.Application):
         self.recent_view = [t["uri"] for t in self.lib["recent"]]
         self.sc, self._rows, self._rendered_view, self._scroll_target = None, [], None, None
         self.win = self.mpris = self._dlg = None
+        self._held = self._bg_hint = False  # segundo plano: la app se mantiene viva con la ventana oculta
         self._token = 0
         # estilo, modo móvil, descargas y bandeja
         self.theme = settings.load()
@@ -78,6 +79,7 @@ class App(Gtk.Application):
             act = Gio.SimpleAction.new(name, None)
             act.connect("activate", lambda _a, _p, cb=cb: cb())
             self.add_action(act)
+        self.set_accels_for_action("app.quit", ["<Primary>q"])  # Ctrl+Q = salir del todo
 
     def do_activate(self):
         if self.win:
@@ -106,13 +108,36 @@ class App(Gtk.Application):
         Gtk.Application.do_shutdown(self)
 
     def on_close(self, win):
-        """Si está sonando, cerrar la ventana la oculta y la música sigue (controles en el icono de la barra
-        de tareas, en la barra superior y en la pantalla de bloqueo). Si no suena, se cierra la aplicación."""
+        """Cerrar la ventana (la X) con música sonando NO sale de la app: la oculta y la música sigue
+        (controles en la barra superior, en el panel del sistema y en la pantalla de bloqueo). Sin música,
+        se cierra la aplicación. Para salir del todo estando sonando: botón «Salir», Ctrl+Q o «Salir» del icono."""
         if self.playing:
+            self.keep_alive(True)  # sin esto algunas versiones de GTK terminan el proceso al quedar sin ventanas visibles
             win.set_visible(False)
+            self.background_hint()
             return True
         self.quit()  # hay dos ventanas posibles (escritorio y móvil): cerrar una cierra la app
         return False
+
+    def keep_alive(self, on):
+        """Mantiene (o suelta) la aplicación viva aunque no haya ninguna ventana visible."""
+        if on and not self._held:
+            self.hold()
+            self._held = True
+        elif not on and self._held:
+            self.release()
+            self._held = False
+
+    def background_hint(self):
+        """Aviso (una vez por sesión) de que la música sigue sonando y cómo volver o salir."""
+        if self._bg_hint:
+            return
+        self._bg_hint = True
+        n = Gio.Notification.new("GlassPlayer sigue sonando")
+        n.set_body("Cerraste la ventana pero la música continúa. Contrólala desde el icono de la barra superior "
+                   "y ábrela desde ahí; «Salir» detiene la música.")
+        n.set_priority(Gio.NotificationPriority.LOW)
+        self.send_notification("background", n)
 
     def cur_win(self):
         return self.phone if self.mode == "mobile" and self.phone else self.win
@@ -121,6 +146,7 @@ class App(Gtk.Application):
         w = self.cur_win()
         w.set_visible(True)
         w.present()
+        self.keep_alive(False)  # con la ventana visible ya no hace falta el «hold» explícito
 
     def start_tray(self):
         """Lanza el icono de la barra superior (proceso aparte, ver tray.py)."""
@@ -154,6 +180,8 @@ class App(Gtk.Application):
         hb.pack_end(button("ibtn", self.add_files, icon="list-add-symbolic", tip="Añadir MP3"))
         hb.pack_end(button("ibtn", self.open_style, icon="applications-graphics-symbolic", tip="Personalizar estilo"))
         hb.pack_end(button("ibtn", lambda: self.set_mode("mobile"), icon="phone-symbolic", tip="Modo móvil"))
+        hb.pack_end(button("ibtn", self.quit, icon="application-exit-symbolic",
+                           tip="Salir (la X solo oculta la ventana mientras suena música)"))
         w.set_titlebar(hb)
 
         ov = Gtk.Overlay()
@@ -717,6 +745,15 @@ class App(Gtk.Application):
         self.gst.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, int(value * Gst.SECOND))
         return False
 
+    def seek_to_us(self, pos_us):
+        self.gst.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, max(0, pos_us) * 1000)
+
+    def can_next(self):
+        return bool(self.current())
+
+    def can_prev(self):
+        return bool(self.current())
+
     def seek_rel(self, offset_us):
         self.gst.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, max(0, self.position_us() + offset_us) * 1000)
 
@@ -743,7 +780,17 @@ class App(Gtk.Application):
         self.update_phone()
         self.update_heart()
         self.refresh_playing()
+        self.update_window_title()
         self.show_state()
+
+    def update_window_title(self):
+        """Como Spotify de escritorio: el título de la ventana es «Canción — Artista» y se ve en el dock,
+        en la vista de actividades y en Alt+Tab sin abrir la app."""
+        t = self.current()
+        text = (f"{t['title']} — {t['artist']}" if t.get("artist") else t["title"]) if t else "MusicPlayer"
+        for w in (self.win, self.phone):
+            if w:
+                w.set_title(text)
 
     def set_subtitle(self, text):
         self.l_artist.set_label(text)
