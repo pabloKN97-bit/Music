@@ -141,7 +141,7 @@ class App(Gtk.Application):
         w.add_css_class("glass")
         hb = Gtk.HeaderBar()
         hb.add_css_class("glass-bar")
-        hb.pack_start(label("GlassPlayer", "brand"))
+        hb.pack_start(label("MusicPlayer", "brand"))
         self.search = Gtk.SearchEntry(placeholder_text="Buscar canciones en YouTube…")
         self.search.add_css_class("global-search")
         self.search.connect("activate", lambda e: self.yt_search(e.get_text()))
@@ -680,7 +680,7 @@ class App(Gtk.Application):
 
     def show_track(self):
         t = self.current()
-        self.l_title.set_label(t["title"] if t else "GlassPlayer")
+        self.l_title.set_label(t["title"] if t else "MusicPlayer")
         self.l_artist.set_label(t["artist"] if t else "Elige una canción")
         dur = t["duration"] if t else 0
         self.scale.set_range(0, max(1, dur))
@@ -1077,6 +1077,7 @@ class App(Gtk.Application):
             if track["uri"] not in pl:
                 pl.append(track["uri"])
         self.commit()
+""" LAS CANCIONES SE DESCARGAN EN LA CARPETA MUSIC ORIGINAL DE LINUX, AHI CREA UNA SUBCARPETA CON TODO"""
 
     def _dl_finish(self, ok, fail, err):
         msg = f"{ok} descargada{'s' if ok != 1 else ''} en «{library.DOWNLOADS_PLAYLIST}»" if ok else "No se descargó nada"
