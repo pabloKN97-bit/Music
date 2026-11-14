@@ -99,8 +99,7 @@ class Mpris:
             elif method == "Stop": a.stop()
             elif method == "Seek": a.seek_rel(params.unpack()[0])
         elif method == "Raise":
-            a.win.set_visible(True)
-            a.win.present()
+            a.show_window()
         elif method == "Quit":
             a.quit()
         inv.return_value(None)
