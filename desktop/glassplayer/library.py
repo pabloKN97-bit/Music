@@ -18,6 +18,9 @@ os.makedirs(COVERS, exist_ok=True)
 # Lista que existe siempre: aquí van los MP3 que genera el botón de descarga.
 DOWNLOADS_PLAYLIST = "DescargadasSinConexion"
 
+# Cuántas canciones se recuerdan en la lista de inicio «Recientes».
+RECENT_MAX = 50
+
 
 def _downloads_dir():
     """<carpeta Música del usuario>/GlassPlayer (si no hay carpeta Música configurada, ~/Music)."""
@@ -117,7 +120,8 @@ def read_track(path):
 
 def load():
     """Devuelve {"tracks": [...], "playlists": {nombre: [uri]}, "favorites": [uri],
-    "downloads": {enlace de YouTube: uri del MP3 descargado}}."""
+    "downloads": {enlace de YouTube: uri del MP3 descargado},
+    "recent": [pista, ...]}  (la más reciente primero)."""
     try:
         with open(LIB, encoding="utf-8") as f:
             data = json.load(f)
@@ -129,8 +133,17 @@ def load():
     data.setdefault("playlists", {})
     data.setdefault("favorites", [])
     data.setdefault("downloads", {})
+    data.setdefault("recent", [])
     data["playlists"].setdefault(DOWNLOADS_PLAYLIST, [])
     return data
+
+
+def push_recent(lib, track):
+    """Pone la pista la primera de «Recientes» (sin duplicados, máximo RECENT_MAX)."""
+    rec = lib["recent"]
+    rec[:] = [t for t in rec if t["uri"] != track["uri"]]
+    rec.insert(0, dict(track))
+    del rec[RECENT_MAX:]
 
 
 def save(lib):

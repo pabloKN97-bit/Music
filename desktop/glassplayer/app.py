@@ -18,7 +18,7 @@ from .style import build_css
 
 V, H = Gtk.Orientation.VERTICAL, Gtk.Orientation.HORIZONTAL
 START, CENTER = Gtk.Align.START, Gtk.Align.CENTER
-TITLES = {"songs": "Canciones", "favs": "Favoritos", "yt": "YouTube"}
+TITLES = {"recent": "Recientes", "songs": "Canciones", "favs": "Favoritos", "yt": "YouTube"}
 PHONE_W, PHONE_H, PHONE_COVER = 390, 780, 300
 COLOR_FIELDS = (("accent", "Color de acento"), ("bg_top", "Fondo (arriba)"),
                 ("bg_bottom", "Fondo (abajo)"), ("text", "Texto"))
@@ -47,7 +47,11 @@ class App(Gtk.Application):
         Gst.init(None)
         self.lib = library.load()
         self.queue, self.idx, self.playing = [], -1, False
-        self.view, self.yt_results, self.yt_status, self.yt_query = "songs", [], "", ""
+        self.view, self.yt_results, self.yt_status, self.yt_query = "recent", [], "", ""
+        # «Recientes» (pantalla de inicio): el orden se fija al entrar en la vista, para que la lista no se
+        # recoloque bajo el cursor mientras se pincha una canción.
+        self.recent_view = [t["uri"] for t in self.lib["recent"]]
+        self.sc, self._rows, self._rendered_view, self._scroll_target = None, [], None, None
         self.win = self.mpris = self._dlg = None
         self._token = 0
         # estilo, modo móvil, descargas y bandeja
@@ -86,6 +90,7 @@ class App(Gtk.Application):
         self.mpris = Mpris(self)
         GLib.timeout_add(500, self.tick)
         self.render_sidebar()
+        self.render_main()
         self.show_track()
         self.start_tray()
 
@@ -184,8 +189,9 @@ class App(Gtk.Application):
         self.l_status = label("", "sub")
         self.lst = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.lst.connect("row-activated", lambda _l, row: self.play_list(self.view_tracks(), row.get_index()))
-        sc = Gtk.ScrolledWindow(vexpand=True)
+        self.sc = sc = Gtk.ScrolledWindow(vexpand=True)
         sc.set_child(self.lst)
+        sc.get_vadjustment().connect("changed", self.on_scroll_range)
         for x in (head, self.l_status, sc):
             main.append(x)
         shell.append(self.build_transport())
@@ -295,7 +301,7 @@ class App(Gtk.Application):
         self.clear(self.side_box)
         sb = self.side_box
         sb.append(label("BIBLIOTECA", "side-title"))
-        for key, icon in (("songs", "audio-x-generic-symbolic"), ("favs", "emblem-favorite-symbolic"), ("yt", "web-browser-symbolic")):
+        for key, icon in (("recent", "document-open-recent-symbolic"), ("songs", "audio-x-generic-symbolic"), ("favs", "emblem-favorite-symbolic"), ("yt", "web-browser-symbolic")):
             sb.append(self.nav_item(key, icon, TITLES[key]))
         sb.append(label("LISTAS", "side-title"))
         for name in self.lib["playlists"]:
@@ -314,10 +320,16 @@ class App(Gtk.Application):
 
     def set_view(self, key):
         self.view = key
+        if key == "recent":  # al entrar se toma el orden actual de «Recientes»
+            self.recent_view = [t["uri"] for t in self.lib["recent"]]
         self.render_sidebar()
         self.render_main()
 
     def view_tracks(self):
+        if self.view == "recent":
+            by = {t["uri"]: t for t in self.lib["recent"]}
+            by.update({t["uri"]: t for t in self.lib["tracks"]})  # la biblioteca tiene los datos más recientes
+            return [by[u] for u in self.recent_view if u in by]
         if self.view == "songs":
             return self.lib["tracks"]
         if self.view == "favs":
@@ -340,10 +352,33 @@ class App(Gtk.Application):
         todo = [t for t in tr if self.dl_state(t) == "todo"]
         self.btn_dl.set_visible(bool(todo))
         self.btn_dl.set_label(f"⬇  Descargar ({len(todo)})" if len(todo) > 1 else "⬇  Descargar")
+        # Si seguimos en la misma vista (marcar favorito, quitar de lista…), la lista no salta al principio.
+        keep = self.sc.get_vadjustment().get_value() if self._rendered_view == self.view else 0
+        self._rendered_view = self.view
         self.clear(self.lst)
+        self._rows = []
         cur = self.current()
         for i, t in enumerate(tr):
             self.lst.append(self.make_row(t, i, bool(cur) and cur["uri"] == t["uri"]))
+        self._scroll_target = (keep, GLib.get_monotonic_time() + 400_000)
+        self.on_scroll_range(self.sc.get_vadjustment())
+
+    def on_scroll_range(self, adj):
+        """Tras reconstruir la lista GTK recalcula su tamaño; entonces se restaura la posición."""
+        tgt = self._scroll_target
+        if tgt and GLib.get_monotonic_time() < tgt[1]:
+            adj.set_value(min(tgt[0], max(0, adj.get_upper() - adj.get_page_size())))
+
+    def refresh_playing(self):
+        """Marca la fila que suena sin reconstruir la lista (así no se pierde la posición del scroll)."""
+        cur = self.current()
+        for r in self._rows:
+            on = bool(cur) and cur["uri"] == r["uri"]
+            if on:
+                r["row"].add_css_class("playing")
+            else:
+                r["row"].remove_css_class("playing")
+            r["num"].set_label("▶" if on else str(r["i"] + 1))
 
     def status_text(self):
         if self.dl_status:
@@ -351,6 +386,8 @@ class App(Gtk.Application):
         tr = self.view_tracks()
         if self.view == "yt":
             return self.yt_status or ("" if tr else "Escribe en la barra superior y pulsa Intro para buscar en YouTube")
+        if self.view == "recent":
+            return "" if tr else "Aún no has escuchado nada: elige una canción y aparecerá aquí"
         return "" if tr else "Aún no hay canciones aquí"
 
     def refresh_status(self):
@@ -372,7 +409,9 @@ class App(Gtk.Application):
         if t["uri"] in self.lib["favorites"]:
             heart.add_css_class("on")
         heart.connect("clicked", lambda _b: self.toggle_fav(t))
-        cells = [label("▶" if playing else str(i + 1), "num", width_chars=3), th, col, heart]
+        num = label("▶" if playing else str(i + 1), "num", width_chars=3)
+        self._rows.append({"uri": t["uri"], "row": row, "num": num, "th": th, "i": i})
+        cells = [num, th, col, heart]
         if youtube.is_yt(t["uri"]):
             cells.append(self.dl_button(t))
         cells += [self.row_menu(t), label(library.fmt(t["duration"]), "sub", width_chars=5)]
@@ -491,6 +530,7 @@ class App(Gtk.Application):
         for lst in self.lib["playlists"].values():
             while uri in lst:
                 lst.remove(uri)
+        self.lib["recent"] = [x for x in self.lib["recent"] if x["uri"] != uri]
         if cur and cur["uri"] == uri:
             self.stop()
             self.queue, self.idx = [], -1
@@ -540,11 +580,12 @@ class App(Gtk.Application):
         path = library.save_cover(data) if t else None
         if path:
             old, t["cover"] = t.get("cover"), path
-            for x in self.lib["tracks"]:  # la copia de la biblioteca también
+            for x in self.lib["tracks"] + self.lib["recent"]:  # la copia de la biblioteca y «Recientes» también
                 if x["uri"] == t["uri"]:
                     x["cover"] = path
             library.drop_cover(old, self.lib["tracks"] + self.queue)
             self.show_track()
+            self.render_main()  # la miniatura de la fila cambia; la posición del scroll se conserva
             library.save(self.lib)
 
     # ------------------------------------------------------------ YouTube
@@ -575,6 +616,7 @@ class App(Gtk.Application):
             self.yt_status = "No se pudo buscar (sin conexión o yt-dlp desactualizado: ejecuta 'yt-dlp -U')"
         else:
             self.yt_results, self.yt_status = res, "" if res else "Sin resultados"
+        self._rendered_view = None  # resultados nuevos: la lista empieza desde arriba
         self.render_main()
 
     # ------------------------------------------------------------ reproducción
@@ -600,6 +642,8 @@ class App(Gtk.Application):
         self.idx, self.playing = i, True
         self._token += 1
         t = self.queue[i]
+        library.push_recent(self.lib, t)  # «Recientes»: la lista visible no se recoloca hasta volver a entrar
+        library.save(self.lib)
         self.gst.set_state(Gst.State.NULL)
         self.show_track()
         if youtube.is_yt(t["uri"]):
@@ -630,6 +674,12 @@ class App(Gtk.Application):
             for x in self.lib["tracks"]:
                 if x["uri"] == t["uri"]:
                     x["cover"] = path
+            for x in self.lib["recent"]:
+                if x["uri"] == t["uri"]:
+                    x["cover"] = path
+            for r in self._rows:  # miniatura de la fila, sin reconstruir la lista
+                if r["uri"] == t["uri"]:
+                    self.set_pic(r["th"], path, 40)
             library.save(self.lib)
         if token != self._token:
             return
@@ -692,7 +742,7 @@ class App(Gtk.Application):
         self.update_bg()
         self.update_phone()
         self.update_heart()
-        self.render_main()
+        self.refresh_playing()
         self.show_state()
 
     def set_subtitle(self, text):
