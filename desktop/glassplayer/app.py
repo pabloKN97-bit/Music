@@ -79,7 +79,7 @@ class App(Gtk.Application):
         if self.win:
             self.show_window()
             return
-        self.win = Gtk.ApplicationWindow(application=self, title="GlassPlayer", default_width=1180, default_height=720)
+        self.win = Gtk.ApplicationWindow(application=self, title="MusicPlayer", default_width=1180, default_height=720)
         self.win.connect("close-request", self.on_close)
         self.build()
         self.win.present()
@@ -200,7 +200,7 @@ class App(Gtk.Application):
         g.connect("released", lambda *_: self.pick_image())
         self.t_cover.add_controller(g)
         info = Gtk.Box(orientation=V, valign=CENTER, hexpand=True)
-        self.l_title, self.l_artist = label("GlassPlayer", "nm", max_width_chars=24), label("", "sub", max_width_chars=26)
+        self.l_title, self.l_artist = label("MusicPlayer", "nm", max_width_chars=24), label("", "sub", max_width_chars=26)
         info.append(self.l_title)
         info.append(self.l_artist)
         self.t_heart = button("heart", lambda: self.toggle_fav(self.current()), icon="emblem-favorite-symbolic", tip="Favorito")
@@ -952,7 +952,7 @@ class App(Gtk.Application):
 
     def build_phone(self):
         """Ventana con forma de teléfono: portada, título y Anterior / Pausa / Siguiente."""
-        w = Gtk.Window(application=self, title="GlassPlayer", decorated=False, resizable=False,
+        w = Gtk.Window(application=self, title="MusicPlayer", decorated=False, resizable=False,
                        default_width=PHONE_W, default_height=PHONE_H)
         w.add_css_class("phone-win")
         w.connect("close-request", self.on_close)
@@ -986,7 +986,7 @@ class App(Gtk.Application):
         self.p_cover.add_css_class("p-cover")
         self.p_cover.set_overflow(Gtk.Overflow.HIDDEN)
         col.append(self.p_cover)
-        self.p_title = Gtk.Label(label="GlassPlayer", ellipsize=Pango.EllipsizeMode.END, max_width_chars=24, margin_top=10)
+        self.p_title = Gtk.Label(label="MusicPlayer", ellipsize=Pango.EllipsizeMode.END, max_width_chars=24, margin_top=10)
         self.p_title.add_css_class("p-title")
         self.p_artist = Gtk.Label(label="", ellipsize=Pango.EllipsizeMode.END, max_width_chars=30)
         self.p_artist.add_css_class("p-artist")
@@ -1017,7 +1017,7 @@ class App(Gtk.Application):
         if not self.phone:
             return
         t = self.current()
-        self.p_title.set_label(t["title"] if t else "GlassPlayer")
+        self.p_title.set_label(t["title"] if t else "MusicPlayer")
         self.p_artist.set_label(t["artist"] if t else "Elige una canción")
         self.set_pic(self.p_cover, t.get("cover") if t else None, PHONE_COVER)
 
@@ -1077,7 +1077,7 @@ class App(Gtk.Application):
             if track["uri"] not in pl:
                 pl.append(track["uri"])
         self.commit()
-""" LAS CANCIONES SE DESCARGAN EN LA CARPETA MUSIC ORIGINAL DE LINUX, AHI CREA UNA SUBCARPETA CON TODO"""
+# LAS CANCIONES SE DESCARGAN EN LA CARPETA MUSIC ORIGINAL DE LINUX, AHI CREA UNA SUBCARPETA CON TODO
 
     def _dl_finish(self, ok, fail, err):
         msg = f"{ok} descargada{'s' if ok != 1 else ''} en «{library.DOWNLOADS_PLAYLIST}»" if ok else "No se descargó nada"

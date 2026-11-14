@@ -1,7 +1,7 @@
 PRIORITARIO
--Reparar la app para que se ejecute correctamente
-Secundario
 
+Secundario
+-Crear la lista que sale al inicio, que sean las ultimas canciones escuchadas en orden
 -definir lo de transparencia
 -definir mejor lo de la barra de tareas
 -reparar barra tareas, salen todas las canciones en vez de una solo, no añade portada ni botones
