@@ -13,8 +13,9 @@ Sin instalar: instala las dependencias de `install.sh` con apt y ejecuta `python
 
 ## Uso
 - **Canciones**: tus MP3 (botón **+** de la barra superior). **Favoritos**: pulsa el corazón de cualquier fila.
-- **Listas**: escribe un nombre en "Nueva lista…" (barra lateral). Menú **⋯** de cada fila: añadir a una lista, quitar, eliminar.
-- **YouTube**: escribe en el buscador superior y pulsa Intro. Se reproduce en streaming, sin guardar audio, y la miniatura del vídeo se usa como portada. Con **⋯ → Añadir a la biblioteca** (o con el corazón) se guarda el enlace.
+- **Listas**: escribe un nombre en "Nueva lista…" (barra lateral). Dentro de cada lista creada hay un botón **＋ Añadir canciones**: abre un selector con tu biblioteca (con filtro y casillas) para meter varias de golpe, y **Desde archivos MP3…** para añadir MP3 del equipo directamente a esa lista. Menú **⋯** de cada fila: añadir a una lista, quitar, eliminar.
+- **YouTube**: pincha el buscador superior (o pulsa **Ctrl+F**, o empieza a escribir) desde cualquier lista y la app pasa sola a la lista YouTube; escribe y pulsa Intro para ver los resultados. Se reproduce en streaming, sin guardar audio, y la miniatura del vídeo se usa como portada. Con **⋯ → Añadir a la biblioteca** (o con el corazón) se guarda el enlace.
+- **Cola de canciones**: en **⋯** de cualquier canción: **Añadir a la cola** (al final) o **Reproducir a continuación** (la primera). Se ve en **Cola** (barra lateral o botón de lista junto al volumen, con el contador): *Sonando ahora*, *En cola* (se quitan con ✕ o «Vaciar cola») y *A continuación* (lo que queda de la lista que sonaba). Las canciones de la cola suenan primero y después la lista sigue por donde iba, aunque cambies de lista; pinchar una fila de la cola la reproduce al instante. Si no suena nada, «Añadir a la cola» empieza por esa canción.
 - **Portada**: haz clic en la portada de la barra inferior para elegir una imagen.
 
 ## Personalizar estilo
