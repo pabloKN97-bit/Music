@@ -10,23 +10,27 @@ from .settings import PRESETS, rgb_of
 
 TEMPLATE = Template("""
 window.glass {
+  backround-color: transparent;
   background-image: linear-gradient(180deg, rgba($top_rgb,$op) 0%, rgba($bot_rgb,$op) 100%);
   color: $text;
   font-family: 'Inter', 'Ubuntu', sans-serif;
 }
-.shell { background: rgba(255,255,255,$a_shell); }
+.shell { background: rgba(0,0,0, $g_dark);
+	 background-image: linear-gradient(180deg, rgba(255,255,255,$g_top), rgba(255,255,255,$g_bot) }
 .sub, .crumb, .num { color: rgba($text_rgb,0.50); }
 .nm { font-weight: 600; font-size: 13.5px; }
 
 /* barra de título */
 headerbar.glass-bar {
-  background: rgba(255,255,255,$a_bar); border: none; border-bottom: 1px solid rgba(255,255,255,0.08);
-  box-shadow: none; color: $text; min-height: 56px;
+  background-color: transparent;
+  background-image: linear-gradient(180deg, rgba(255,255,255,$g_top), rgba(255,255,255,$g_bot));
+  border: none; border-bottom: 1px solid rgba(255,255,255,0.30);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.45); color: $text; min-height: 56px;
 }
 .brand { font-family: 'Instrument Serif', 'Playfair Display', serif; font-size: 22px; padding: 0 8px; }
 .global-search {
-  background: rgba(0,0,0,0.22); color: $text; border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 10px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.08); min-width: 340px;
+  background: rgba(255,255,255,0.14); color: $text; border: 1px solid rgba(255,255,255,0.30);
+  border-radius: 999px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.35); min-width: 340px;
 }
 
 /* barra lateral */
@@ -42,7 +46,7 @@ button.side-item.on {
   background-image: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06));
   color: $text; box-shadow: inset 0 1px 0 rgba(255,255,255,0.35);
 }
-entry.new-list { background: rgba(0,0,0,0.22); color: $text; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; margin-top: 8px; }
+entry.new-list { background: rgba(255,2555,255,0.22); color: $text; border: 1px solid rgba(255,255,255,0.30); border-radius: 999px; margin-top: 8px; }
 
 /* contenido */
 .main { padding: 18px 22px 8px; }
@@ -81,7 +85,12 @@ button.play {
 button.play:hover { background-image: linear-gradient(180deg, #ffffff, #e2e8ee); }
 
 /* barra de reproducción */
-.transport { border-top: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,$a_transport); padding: 10px 22px; min-height: 88px; }
+.transport {
+  border-top: 1px solid rgba(255,255,255,0.30);
+  background-color: rgba(0,0,0,$g_dark);
+  background-image: linear-gradient(180deg, rgba(255,255,255,$g_top), rgba(255,255,255,$g_bot));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.35); padding: 10px 22px; min-height: 88px;
+}
 scale trough { background: rgba(255,255,255,0.12); min-height: 5px; border-radius: 999px; }
 scale highlight { background-image: linear-gradient(90deg, #e8ecf0, #ffffff); border-radius: 999px; }
 scale slider { background: #fff; min-width: 13px; min-height: 13px; border-radius: 999px; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
@@ -138,11 +147,14 @@ def swatch_css():
 
 
 def build_css(theme):
-    op = 1 - theme["transparency"] / 100
+    op = max(0.15, 1 - theme["transparency"] / 100)
     return TEMPLATE.substitute(
         accent=theme["accent"], accent_rgb=rgb_of(theme["accent"]),
         text=theme["text"], text_rgb=rgb_of(theme["text"]),
         top_rgb=rgb_of(theme["bg_top"]), bot_rgb=rgb_of(theme["bg_bottom"]),
         op=f"{op:.2f}",
-        a_shell=f"{0.10 * op:.3f}", a_bar=f"{0.06 * op:.3f}", a_transport=f"{0.15 * op:.3f}",
+        g_top=f"{0.06 + 0.22 * op:.3f}",    
+        g_bot=f"{0.02 + 0.08 * op:.3f}",
+        g_dark=f"{0.08 + 0.10 * op:.3f}",
+        #a_shell=f"{0.10 * op:.3f}", a_bar=f"{0.06 * op:.3f}", a_transport=f"{0.15 * op:.3f}",
     ) + swatch_css()

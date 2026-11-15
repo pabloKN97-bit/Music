@@ -14,7 +14,7 @@ DEFAULT_THEME = {
     "bg_top": "#4d4d4f",      # degradado de fondo, parte superior
     "bg_bottom": "#0e0e10",   # degradado de fondo, parte inferior
     "text": "#f6f8fb",        # color del texto
-    "transparency": 0,        # 0 = opaco … 90 = casi transparente (se ve lo que hay detrás de la ventana)
+    "transparency": 0,        # 0 = opaco … 85 = casi transparente (se ve lo que hay detrás de la ventana)
     "bg_image": None,         # ruta de la imagen de fondo elegida (copia propia en backgrounds/)
 }
 
@@ -56,7 +56,7 @@ def load():
         if is_hex(raw.get(k)):
             theme[k] = raw[k].lower()
     try:
-        theme["transparency"] = max(0, min(90, int(raw.get("transparency", 0))))
+        theme["transparency"] = max(0, min(85, int(raw.get("transparency", 0))))
     except (TypeError, ValueError):
         pass
     img = raw.get("bg_image")

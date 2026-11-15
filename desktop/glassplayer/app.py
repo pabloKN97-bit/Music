@@ -1069,7 +1069,7 @@ class App(Gtk.Application):
 
     def apply_opacity(self):
         """La transparencia afecta a fondos y capas (el texto se mantiene legible)."""
-        op = 1 - self.theme["transparency"] / 100
+        op = max(0.15, 1 - self.theme["transparency"] / 100)
         base = 0.9 if self.theme.get("bg_image") else 0.55
         for pic in self.bg_pictures():
             pic.set_opacity(base * op)
@@ -1156,7 +1156,7 @@ class App(Gtk.Application):
 
         box.append(label("TRANSPARENCIA", "panel-sec"))
         trow = Gtk.Box(spacing=10)
-        self.tr_scale = Gtk.Scale.new_with_range(H, 0, 90, 1)
+        self.tr_scale = Gtk.Scale.new_with_range(H, 0, 85, 1)
         self.tr_scale.set_draw_value(False)
         self.tr_scale.set_hexpand(True)
         self.tr_scale.set_value(self.theme["transparency"])
