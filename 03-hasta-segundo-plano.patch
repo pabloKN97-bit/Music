@@ -1,0 +1,464 @@
+From c4973a7b4079434b75b6cb391df9237fb56a81c9 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 14 Nov 2026 19:36:41 +0000
+Subject: [PATCH] Secundarios 1-3: barra con botones, panel multimedia y musica
+ en segundo plano al cerrar la ventana
+
+---
+ desktop/README.md            |  16 ++--
+ desktop/glassplayer/app.py   |  51 +++++++++++-
+ desktop/glassplayer/mpris.py |  53 +++++++++---
+ desktop/glassplayer/tray.py  | 151 ++++++++++++++++++++++++++++++++++-
+ 4 files changed, 254 insertions(+), 17 deletions(-)
+
+diff --git a/desktop/README.md b/desktop/README.md
+index 6344dd1..136470f 100644
+--- a/desktop/README.md
++++ b/desktop/README.md
+@@ -7,7 +7,7 @@ Reproductor (GTK4 + GStreamer) con estética Apple Music "glass": degradado gris
+ cd desktop && ./install.sh
+ glassplayer
+ ```
+-El instalador también deja GlassPlayer **fijado en la barra de tareas** (dock). Clic derecho sobre su icono: Reproducir/Pausa, Siguiente, Anterior y Salir. Si lo cierras mientras suena, la música sigue en segundo plano y se controla desde ese menú o desde la pantalla de bloqueo.
++El instalador también deja GlassPlayer **fijado en la barra de tareas** (dock). Clic derecho sobre su icono: Reproducir/Pausa, Siguiente, Anterior y Salir. Si cierras la ventana (la X) mientras suena, la música sigue en segundo plano y se controla desde la barra superior, el panel del sistema o la pantalla de bloqueo (la primera vez avisa con una notificación). Se vuelve a abrir desde el dock o desde el icono de la barra superior. **Para salir del todo** (y detener la música): botón **Salir** de la barra superior de la app, **Ctrl+Q**, o «Salir» en el icono. Con la música en pausa, la X sí cierra la app.
+ 
+ Sin instalar: instala las dependencias de `install.sh` con apt y ejecuta `python3 -m glassplayer` dentro de `desktop/`.
+ 
+@@ -35,13 +35,19 @@ Todo ocurre en segundo plano y con tus permisos de usuario: la app toma el enlac
+ 
+ ## Barra de tareas y barra superior
+ - **Icono fijado en el dock**: clic derecho → Reproducir/Pausa, Siguiente, Anterior, Salir.
+-- **Icono en la barra superior** (junto al reloj): muestra el **nombre de la canción** y su menú tiene **Anterior · Pausa/Reproducir · Siguiente**, Abrir y Salir; el clic central pausa/reanuda. Lo lanza la app sola (`tray.py`, proceso aparte con AppIndicator) y desaparece al cerrarla. En Ubuntu funciona de serie; en GNOME "puro" hace falta la extensión *AppIndicator and KStatusNotifierItem Support*. Para desactivarlo: `GLASSPLAYER_NO_TRAY=1 glassplayer`.
+-- El dock de GNOME no permite mostrar texto ni botones propios en el icono; por eso el título y los controles viven en la barra superior (y también en el menú del sistema y la pantalla de bloqueo, vía MPRIS).
++- **Barra superior estilo Spotify** (junto al reloj): el **nombre de la canción** y, a su lado, tres botones de **un solo clic**: ⏮ Anterior · ⏯ Pausa/Reproducir (el icono cambia solo) · ⏭ Siguiente. No hace falta abrir ningún menú. El nombre también tiene menú (Abrir, Salir) y el clic central pausa/reanuda. Al pasar el ratón por un botón se ve la canción actual.
++- **Título de la ventana** = «Canción — Artista» (como Spotify): se ve en el dock, en Actividades y en Alt+Tab.
++- Lo lanza la app sola (`tray.py`, proceso aparte) y desaparece al cerrarla. En Ubuntu funciona de serie; en GNOME "puro" hace falta la extensión *AppIndicator and KStatusNotifierItem Support*. GNOME coloca cada icono nuevo a la izquierda del anterior; si en tu equipo el orden sale distinto, no afecta al funcionamiento. Para desactivar solo los botones: `GLASSPLAYER_NO_TRAY_BUTTONS=1 glassplayer`; todo el icono: `GLASSPLAYER_NO_TRAY=1 glassplayer`.
++- El dock de GNOME no permite mostrar texto ni botones propios en el icono; por eso el título y los botones viven en la barra superior (y también en el menú del sistema y la pantalla de bloqueo, vía MPRIS).
+ 
+ ## YouTube
+ Usa `yt-dlp`. Si deja de funcionar: `yt-dlp -U`. Las versiones recientes pueden pedir un runtime de JavaScript (deno o nodejs; el instalador pone nodejs); consulta la documentación de yt-dlp si te lo indica. Úsalo con contenido que tengas derecho a reproducir (p. ej. tu propio canal).
+ 
+-## Pantalla de bloqueo
+-La canción se publica por MPRIS: GNOME muestra título, artista, portada y controles al bloquear y responde a las teclas multimedia. Esa pantalla la dibuja GNOME Shell, así que su aspecto lo decide el sistema.
++## Panel multimedia del sistema y pantalla de bloqueo
++La canción se publica por MPRIS: GNOME muestra **una sola tarjeta con la canción que suena** (título, artista, portada y botones Anterior / Pausa / Siguiente) en el menú del sistema y al bloquear, y responde a las teclas multimedia.
++- Los botones Anterior/Siguiente están siempre disponibles mientras suena algo (con una sola canción en la lista la reinician); antes GNOME los ocultaba.
++- La portada es la de la canción; si es de YouTube y aún no tiene portada guardada se usa su miniatura, y si no hay ninguna, el icono de la app.
++- La pista tiene un identificador estable (ya no depende de su posición en la lista) y la app nunca publica la lista de canciones, solo la actual.
++Esa pantalla la dibuja GNOME Shell, así que su aspecto lo decide el sistema.
+ 
+ Datos en `~/.local/share/glassplayer/` (biblioteca, portadas, fondos, ajustes). Descargas en `~/Música/GlassPlayer/`.
+diff --git a/desktop/glassplayer/app.py b/desktop/glassplayer/app.py
+index 2afa780..fd45c27 100755
+--- a/desktop/glassplayer/app.py
++++ b/desktop/glassplayer/app.py
+@@ -53,6 +53,7 @@ class App(Gtk.Application):
+         self.recent_view = [t["uri"] for t in self.lib["recent"]]
+         self.sc, self._rows, self._rendered_view, self._scroll_target = None, [], None, None
+         self.win = self.mpris = self._dlg = None
++        self._held = self._bg_hint = False  # segundo plano: la app se mantiene viva con la ventana oculta
+         self._token = 0
+         # estilo, modo móvil, descargas y bandeja
+         self.theme = settings.load()
+@@ -78,6 +79,7 @@ class App(Gtk.Application):
+             act = Gio.SimpleAction.new(name, None)
+             act.connect("activate", lambda _a, _p, cb=cb: cb())
+             self.add_action(act)
++        self.set_accels_for_action("app.quit", ["<Primary>q"])  # Ctrl+Q = salir del todo
+ 
+     def do_activate(self):
+         if self.win:
+@@ -106,14 +108,37 @@ class App(Gtk.Application):
+         Gtk.Application.do_shutdown(self)
+ 
+     def on_close(self, win):
+-        """Si está sonando, cerrar la ventana la oculta y la música sigue (controles en el icono de la barra
+-        de tareas, en la barra superior y en la pantalla de bloqueo). Si no suena, se cierra la aplicación."""
++        """Cerrar la ventana (la X) con música sonando NO sale de la app: la oculta y la música sigue
++        (controles en la barra superior, en el panel del sistema y en la pantalla de bloqueo). Sin música,
++        se cierra la aplicación. Para salir del todo estando sonando: botón «Salir», Ctrl+Q o «Salir» del icono."""
+         if self.playing:
++            self.keep_alive(True)  # sin esto algunas versiones de GTK terminan el proceso al quedar sin ventanas visibles
+             win.set_visible(False)
++            self.background_hint()
+             return True
+         self.quit()  # hay dos ventanas posibles (escritorio y móvil): cerrar una cierra la app
+         return False
+ 
++    def keep_alive(self, on):
++        """Mantiene (o suelta) la aplicación viva aunque no haya ninguna ventana visible."""
++        if on and not self._held:
++            self.hold()
++            self._held = True
++        elif not on and self._held:
++            self.release()
++            self._held = False
++
++    def background_hint(self):
++        """Aviso (una vez por sesión) de que la música sigue sonando y cómo volver o salir."""
++        if self._bg_hint:
++            return
++        self._bg_hint = True
++        n = Gio.Notification.new("GlassPlayer sigue sonando")
++        n.set_body("Cerraste la ventana pero la música continúa. Contrólala desde el icono de la barra superior "
++                   "y ábrela desde ahí; «Salir» detiene la música.")
++        n.set_priority(Gio.NotificationPriority.LOW)
++        self.send_notification("background", n)
++
+     def cur_win(self):
+         return self.phone if self.mode == "mobile" and self.phone else self.win
+ 
+@@ -121,6 +146,7 @@ class App(Gtk.Application):
+         w = self.cur_win()
+         w.set_visible(True)
+         w.present()
++        self.keep_alive(False)  # con la ventana visible ya no hace falta el «hold» explícito
+ 
+     def start_tray(self):
+         """Lanza el icono de la barra superior (proceso aparte, ver tray.py)."""
+@@ -154,6 +180,8 @@ class App(Gtk.Application):
+         hb.pack_end(button("ibtn", self.add_files, icon="list-add-symbolic", tip="Añadir MP3"))
+         hb.pack_end(button("ibtn", self.open_style, icon="applications-graphics-symbolic", tip="Personalizar estilo"))
+         hb.pack_end(button("ibtn", lambda: self.set_mode("mobile"), icon="phone-symbolic", tip="Modo móvil"))
++        hb.pack_end(button("ibtn", self.quit, icon="application-exit-symbolic",
++                           tip="Salir (la X solo oculta la ventana mientras suena música)"))
+         w.set_titlebar(hb)
+ 
+         ov = Gtk.Overlay()
+@@ -717,6 +745,15 @@ class App(Gtk.Application):
+         self.gst.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, int(value * Gst.SECOND))
+         return False
+ 
++    def seek_to_us(self, pos_us):
++        self.gst.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, max(0, pos_us) * 1000)
++
++    def can_next(self):
++        return bool(self.current())
++
++    def can_prev(self):
++        return bool(self.current())
++
+     def seek_rel(self, offset_us):
+         self.gst.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, max(0, self.position_us() + offset_us) * 1000)
+ 
+@@ -743,8 +780,18 @@ class App(Gtk.Application):
+         self.update_phone()
+         self.update_heart()
+         self.refresh_playing()
++        self.update_window_title()
+         self.show_state()
+ 
++    def update_window_title(self):
++        """Como Spotify de escritorio: el título de la ventana es «Canción — Artista» y se ve en el dock,
++        en la vista de actividades y en Alt+Tab sin abrir la app."""
++        t = self.current()
++        text = (f"{t['title']} — {t['artist']}" if t.get("artist") else t["title"]) if t else "MusicPlayer"
++        for w in (self.win, self.phone):
++            if w:
++                w.set_title(text)
++
+     def set_subtitle(self, text):
+         self.l_artist.set_label(text)
+         if self.phone:
+diff --git a/desktop/glassplayer/mpris.py b/desktop/glassplayer/mpris.py
+index fe9b36b..69fdfa6 100644
+--- a/desktop/glassplayer/mpris.py
++++ b/desktop/glassplayer/mpris.py
+@@ -1,5 +1,8 @@
+ """MPRIS2 por D-Bus: GNOME muestra título, artista, portada y controles en la pantalla de
+ bloqueo, en el menú del sistema y responde a las teclas multimedia."""
++import hashlib
++import os
++
+ from gi.repository import Gio, GLib
+ 
+ PATH = "/org/mpris/MediaPlayer2"
+@@ -23,6 +26,8 @@ XML = """
+                               <arg direction="in" name="Position" type="x"/></method>
+   <property name="PlaybackStatus" type="s" access="read"/>
+   <property name="Metadata" type="a{sv}" access="read"/>
++  <property name="LoopStatus" type="s" access="read"/>
++  <property name="Shuffle" type="b" access="read"/>
+   <property name="Position" type="x" access="read"/>
+   <property name="Rate" type="d" access="read"/>
+   <property name="MinimumRate" type="d" access="read"/>
+@@ -44,6 +49,7 @@ class Mpris:
+     def __init__(self, app):
+         self.app = app
+         self.conn = None
++        self._last = None
+         self.node = Gio.DBusNodeInfo.new_for_xml(XML)
+         Gio.bus_own_name(Gio.BusType.SESSION, "org.mpris.MediaPlayer2.glassplayer",
+                          Gio.BusNameOwnerFlags.NONE, self._acquired, None, None)
+@@ -54,28 +60,49 @@ class Mpris:
+             conn.register_object(PATH, ifc, self._call, self._get, None)
+ 
+     # ---- estado ----
++    @staticmethod
++    def track_id(t):
++        """Identificador estable de la pista (no cambia aunque cambie la lista o su posición)."""
++        return "/com/pablo/glassplayer/track/" + hashlib.md5(t["uri"].encode()).hexdigest()[:16]
++
++    @staticmethod
++    def art_url(t):
++        """Portada para el panel del sistema: la local; si aún no hay, la miniatura de YouTube; y si no, el icono de la app."""
++        if t.get("cover") and os.path.exists(t["cover"]):
++            return Gio.File.new_for_path(t["cover"]).get_uri()
++        if t.get("thumb"):
++            return t["thumb"]
++        icon = os.path.join(GLib.get_user_data_dir(), "icons", "hicolor", "scalable", "apps", "com.pablo.glassplayer.svg")
++        return Gio.File.new_for_path(icon).get_uri() if os.path.exists(icon) else None
++
+     def _metadata(self):
+-        a = self.app
+-        t = a.current()
++        """Una sola pista: la que suena ahora (nunca la lista entera)."""
++        t = self.app.current()
+         if not t:
+             return {}
+-        m = {"mpris:trackid": V("o", f"/com/pablo/glassplayer/track/{a.idx}"),
+-             "mpris:length": V("x", int(t["duration"] * 1_000_000)),
++        m = {"mpris:trackid": V("o", self.track_id(t)),
+              "xesam:title": V("s", t["title"]),
+              "xesam:artist": V("as", [t["artist"]]),
+              "xesam:album": V("s", t.get("album") or "")}
+-        if t.get("cover"):
+-            m["mpris:artUrl"] = V("s", Gio.File.new_for_path(t["cover"]).get_uri())
++        if t.get("duration", 0) > 0:
++            m["mpris:length"] = V("x", int(t["duration"] * 1_000_000))
++        art = self.art_url(t)
++        if art:
++            m["mpris:artUrl"] = V("s", art)
+         return m
+ 
+     def _player_props(self):
+         a = self.app
+-        n = len(a.queue)
+-        status = "Playing" if a.playing else ("Paused" if a.current() else "Stopped")
++        cur = a.current()
++        status = "Playing" if a.playing else ("Paused" if cur else "Stopped")
++        # Anterior/Siguiente siempre disponibles mientras haya una pista (con una sola canción, la reinician);
++        # si no, GNOME oculta los botones del panel.
+         return {"PlaybackStatus": V("s", status), "Metadata": V("a{sv}", self._metadata()),
++                "LoopStatus": V("s", "None"), "Shuffle": V("b", False),
+                 "Position": V("x", a.position_us()), "Rate": V("d", 1.0), "MinimumRate": V("d", 1.0),
+                 "MaximumRate": V("d", 1.0), "Volume": V("d", 1.0),
+-                "CanGoNext": V("b", n > 1), "CanGoPrevious": V("b", n > 1), "CanPlay": V("b", bool(a.queue or a.lib["tracks"])),
++                "CanGoNext": V("b", a.can_next()), "CanGoPrevious": V("b", a.can_prev()),
++                "CanPlay": V("b", bool(a.queue or a.lib["tracks"])),
+                 "CanPause": V("b", True), "CanSeek": V("b", True), "CanControl": V("b", True)}
+ 
+     def _root_props(self):
+@@ -98,6 +125,11 @@ class Mpris:
+             elif method == "Previous": a.go_prev()
+             elif method == "Stop": a.stop()
+             elif method == "Seek": a.seek_rel(params.unpack()[0])
++            elif method == "SetPosition":
++                tid, pos = params.unpack()
++                cur = a.current()
++                if cur and tid == self.track_id(cur):
++                    a.seek_to_us(pos)
+         elif method == "Raise":
+             a.show_window()
+         elif method == "Quit":
+@@ -110,5 +142,8 @@ class Mpris:
+             return
+         p = self._player_props()
+         changed = {k: p[k] for k in ("PlaybackStatus", "Metadata", "CanGoNext", "CanGoPrevious", "CanPlay")}
++        if self._last == (changed["PlaybackStatus"].unpack(), changed["Metadata"].unpack(), changed["CanGoNext"].unpack()):
++            return  # nada nuevo: no se molesta a GNOME
++        self._last = (changed["PlaybackStatus"].unpack(), changed["Metadata"].unpack(), changed["CanGoNext"].unpack())
+         self.conn.emit_signal(None, PATH, "org.freedesktop.DBus.Properties", "PropertiesChanged",
+                               V("(sa{sv}as)", ("org.mpris.MediaPlayer2.Player", changed, [])))
+diff --git a/desktop/glassplayer/tray.py b/desktop/glassplayer/tray.py
+index f925ab5..1ec0b11 100644
+--- a/desktop/glassplayer/tray.py
++++ b/desktop/glassplayer/tray.py
+@@ -1,6 +1,8 @@
+ """Icono de GlassPlayer en la barra superior de Ubuntu (StatusNotifier / AppIndicator).
+ 
+-Muestra el nombre de la canción junto al icono y, en su menú, Anterior / Pausa / Siguiente.
++Muestra el nombre de la canción junto al icono y, a su lado, tres botones de un solo clic
++(⏮ Anterior · ⏯ Pausa/Reproducir · ⏭ Siguiente), como la barra de Spotify de escritorio: no hace falta abrir
++ningún menú para encontrarlos. El menú del icono sigue existiendo (clic en el nombre).
+ Corre como proceso aparte (lo lanza la app) porque AppIndicator usa GTK3 y la app usa GTK4, que no
+ pueden convivir en un mismo proceso. Habla con la app por MPRIS (D-Bus) y se cierra solo cuando
+ la app termina. Requiere el paquete gir1.2-ayatanaappindicator3-0.1.
+@@ -30,6 +32,121 @@ PLAYER = ROOT + ".Player"
+ PROPS = "org.freedesktop.DBus.Properties"
+ MAX_LABEL = 38
+ 
++# ---- botones de un solo clic: StatusNotifierItem propios, sin menú (clic = acción) ----
++WATCHER = "org.kde.StatusNotifierWatcher"
++SNI_IFACE = "org.kde.StatusNotifierItem"
++SNI_PATH = "/StatusNotifierItem"
++SNI_XML = """
++<node>
++ <interface name="org.kde.StatusNotifierItem">
++  <property name="Category" type="s" access="read"/>
++  <property name="Id" type="s" access="read"/>
++  <property name="Title" type="s" access="read"/>
++  <property name="Status" type="s" access="read"/>
++  <property name="WindowId" type="u" access="read"/>
++  <property name="IconThemePath" type="s" access="read"/>
++  <property name="IconName" type="s" access="read"/>
++  <property name="IconPixmap" type="a(iiay)" access="read"/>
++  <property name="OverlayIconName" type="s" access="read"/>
++  <property name="OverlayIconPixmap" type="a(iiay)" access="read"/>
++  <property name="AttentionIconName" type="s" access="read"/>
++  <property name="AttentionIconPixmap" type="a(iiay)" access="read"/>
++  <property name="AttentionMovieName" type="s" access="read"/>
++  <property name="ToolTip" type="(sa(iiay)ss)" access="read"/>
++  <property name="ItemIsMenu" type="b" access="read"/>
++  <property name="Menu" type="o" access="read"/>
++  <method name="ContextMenu"><arg type="i" direction="in" name="x"/><arg type="i" direction="in" name="y"/></method>
++  <method name="Activate"><arg type="i" direction="in" name="x"/><arg type="i" direction="in" name="y"/></method>
++  <method name="SecondaryActivate"><arg type="i" direction="in" name="x"/><arg type="i" direction="in" name="y"/></method>
++  <method name="Scroll"><arg type="i" direction="in" name="delta"/><arg type="s" direction="in" name="orientation"/></method>
++  <signal name="NewTitle"/><signal name="NewIcon"/><signal name="NewAttentionIcon"/>
++  <signal name="NewOverlayIcon"/><signal name="NewToolTip"/>
++  <signal name="NewStatus"><arg type="s" name="status"/></signal>
++ </interface>
++</node>"""
++V = GLib.Variant
++
++
++class Button:
++    """Icono de la barra superior que ejecuta una acción con un solo clic (sin menú).
++
++    Es un StatusNotifierItem con su propia conexión y nombre D-Bus (como hacen Electron o Steam):
++    ItemIsMenu=false hace que el clic izquierdo llame a Activate() en vez de abrir un menú.
++    """
++    count = 0
++
++    def __init__(self, ident, title, icon, action):
++        Button.count += 1
++        self.ident, self.title, self.icon, self.action = ident, title, icon, action
++        self.tip = ("", "")
++        self.owned = self.host = self.sent = False  # nombre obtenido / host de iconos presente / ya registrado
++        self.name = f"org.kde.StatusNotifierItem-{os.getpid()}-{Button.count}"
++        addr = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
++        self.conn = Gio.DBusConnection.new_for_address_sync(
++            addr, Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
++            None, None)
++        node = Gio.DBusNodeInfo.new_for_xml(SNI_XML)
++        self.conn.register_object(SNI_PATH, node.interfaces[0], self._call, self._get, None)
++        Gio.bus_own_name_on_connection(self.conn, self.name, Gio.BusNameOwnerFlags.NONE, self._acquired, None)
++        # el host de iconos (GNOME/KDE) puede aparecer después que nosotros: nos registramos cuando esté
++        Gio.bus_watch_name_on_connection(self.conn, WATCHER, Gio.BusNameWatcherFlags.NONE,
++                                         self._host_up, self._host_down)
++
++    def _acquired(self, _conn, _name):
++        self.owned = True
++        self.register()
++
++    def _host_up(self, *_a):
++        self.host = True
++        self.register()
++
++    def _host_down(self, *_a):
++        self.host = self.sent = False  # si el host reaparece, hay que registrarse de nuevo
++
++    def register(self):
++        if self.sent or not (self.owned and self.host):
++            return
++        self.sent = True
++        self.conn.call(WATCHER, "/StatusNotifierWatcher", WATCHER, "RegisterStatusNotifierItem",
++                       V("(s)", (self.name,)), None, Gio.DBusCallFlags.NONE, 2000, None, self._registered)
++
++    def _registered(self, conn, res):
++        try:
++            conn.call_finish(res)
++        except GLib.Error:
++            pass  # no hay host de iconos (GNOME sin la extensión AppIndicator): los botones no se ven
++
++    def _get(self, _conn, _sender, _path, _iface, name):
++        empty = V("a(iiay)", [])
++        return {"Category": V("s", "ApplicationStatus"), "Id": V("s", self.ident), "Title": V("s", self.title),
++                "Status": V("s", "Active"), "WindowId": V("u", 0), "IconThemePath": V("s", ""),
++                "IconName": V("s", self.icon), "IconPixmap": empty, "OverlayIconName": V("s", ""),
++                "OverlayIconPixmap": empty, "AttentionIconName": V("s", ""), "AttentionIconPixmap": empty,
++                "AttentionMovieName": V("s", ""), "ToolTip": V("(sa(iiay)ss)", ("", [], *self.tip)),
++                "ItemIsMenu": V("b", False), "Menu": V("o", "/NO_DMENU")}.get(name)
++
++    def _call(self, _conn, _sender, _path, _iface, method, _params, inv):
++        if method in ("Activate", "SecondaryActivate"):
++            self.action()
++        inv.return_value(None)
++
++    def update(self, icon=None, title=None, tip=None):
++        """Cambia icono / texto / tooltip y avisa al host."""
++        if icon is not None and icon != self.icon:
++            self.icon = icon
++            self._emit("NewIcon")
++        if title is not None:
++            self.title = title
++        if tip is not None and tip != self.tip:
++            self.tip = tip
++            self._emit("NewToolTip")
++
++    def _emit(self, signal):
++        try:
++            self.conn.emit_signal(None, SNI_PATH, SNI_IFACE, signal, None)
++        except GLib.Error:
++            pass
++
+ 
+ def short(text, n=MAX_LABEL):
+     return text if len(text) <= n else text[:n - 1] + "…"
+@@ -39,6 +156,7 @@ class Tray:
+     def __init__(self):
+         self.conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+         self.seen = False  # la app ya apareció en el bus (para no salir antes de que arranque)
++        self.buttons = self.make_buttons()
+         self.ind = AppIndicator.Indicator.new("glassplayer", "com.pablo.glassplayer",
+                                               AppIndicator.IndicatorCategory.APPLICATION_STATUS)
+         icons = os.path.join(GLib.get_user_data_dir(), "icons", "hicolor", "scalable", "apps")
+@@ -52,6 +170,25 @@ class Tray:
+         Gio.bus_watch_name_on_connection(self.conn, BUS, Gio.BusNameWatcherFlags.NONE,
+                                          self.on_appeared, self.on_vanished)
+ 
++    # ---- botones de un clic ----
++    def make_buttons(self):
++        """Orden en la barra, de izquierda a derecha: nombre · ⏮ · ⏯ · ⏭ (GNOME coloca cada icono nuevo a la
++        izquierda de los anteriores, así que se registran al revés: siguiente, pausa, anterior, y al final el nombre)."""
++        if os.environ.get("GLASSPLAYER_NO_TRAY_BUTTONS"):
++            return {}
++        try:
++            return {
++                "next": Button("glassplayer-next", "Siguiente", "media-skip-forward-symbolic",
++                               lambda: self.call(PLAYER, "Next")),
++                "play": Button("glassplayer-play", "Reproducir", "media-playback-start-symbolic",
++                               lambda: self.call(PLAYER, "PlayPause")),
++                "prev": Button("glassplayer-prev", "Anterior", "media-skip-backward-symbolic",
++                               lambda: self.call(PLAYER, "Previous")),
++            }
++        except GLib.Error as e:
++            print("GlassPlayer: botones de la barra superior no disponibles:", e, file=sys.stderr)
++            return {}
++
+     # ---- menú ----
+     def item(self, text, cb=None):
+         it = Gtk.MenuItem(label=text)
+@@ -107,6 +244,18 @@ class Tray:
+         self.i_next.set_sensitive(bool(props.get("CanGoNext")))
+         label = short(title) if title else ""
+         self.ind.set_label(label, label)  # texto junto al icono, en la barra superior
++        self.ind.set_title(full or "GlassPlayer")
++        self.update_buttons(full, playing, props)
++
++    def update_buttons(self, full, playing, props):
++        b = self.buttons
++        if not b:
++            return
++        song = full or "Nada en reproducción"
++        b["play"].update(icon="media-playback-pause-symbolic" if playing else "media-playback-start-symbolic",
++                         tip=("Pausa" if playing else "Reproducir", song))
++        b["prev"].update(tip=("Anterior", song))
++        b["next"].update(tip=("Siguiente", song))
+ 
+     def on_appeared(self, _conn, _name, _owner):
+         self.seen = True
+-- 
+2.43.0
+
