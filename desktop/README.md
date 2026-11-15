@@ -22,7 +22,7 @@ Sin instalar: instala las dependencias de `install.sh` con apt y ejecuta `python
 Botón **paleta** de la barra superior. Los cambios se ven al instante y se guardan en `settings.json`:
 - **Paletas** predefinidas y 4 colores a medida (acento, fondo arriba, fondo abajo, texto).
 - **Fondo**: elige una imagen de tu equipo (se copia y reduce a ≤1920 px); «Quitar imagen» vuelve a la portada desenfocada.
-- **Transparencia** (0–90 %): aclara el fondo y las capas para ver las ventanas que hay detrás. El texto no se vuelve transparente. Necesita un escritorio con composición (GNOME y KDE lo traen).
+- **Transparencia** (0–85 %): con 0 % la ventana se ve igual que siempre; al subirla se ve lo que hay detrás (otras ventanas, escritorio) a través del fondo y las capas. Nunca llega al 100 %: queda siempre un mínimo del 15 % de fondo, y se añade un tinte oscuro y un filo claro suaves para que el texto siga legible. El texto no se vuelve transparente. Necesita un escritorio con composición (GNOME y KDE lo traen de serie, también en Ubuntu).
 - **Restablecer** devuelve el estilo original.
 
 ## Modo móvil
