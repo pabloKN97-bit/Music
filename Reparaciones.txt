@@ -1,15 +1,13 @@
 PRIORITARIO
-- No hay
+- En la barra de tareas unicamente debe salir la cancion que esta sonando al momento, las demas deben desaparecer de la barra de tareas, y al cerrar la app todas deben desaparecer de la barra de tareas
 Secundario
 
-- en barra de tareas debe salir el nombre de la cancion y los botones sin necesidad de pinchar en la cancion para encontrar los botones como es actualmente, para ello basate en la barra de tareas que hace spotify en la version de escritorio
--reparar barra tareas, salen todas las canciones en vez de una solo, no añade portada ni botones
-- reparar que al salir de la app no cierre la musica, las canciones de la barra de tareas
-- añadir cola de canciones 
--cambiar buscador, si este es pinchado desde cualquier lista que te cambie a la lista youtube y te muestre los resultados de la busqueda
-- añadir boton para añadir canciones directamente en las listas creadas
+- los botones de la barra de tareas deben ser funcionales, es decir si se pincha en el nombre, te debe abrir la app, si pinchas en pausa se pausa, en anterior reproduce la cancion anterior y en siguiente la cancion siguiente
+- Con el boton de espacio del teclado se debe poder pausar la cancion al tener la aplicacion abierta en primer plano
+- 
 
 
 No desarrollar aun 
 -añadir la posibilidad a futuro de enlazarlo con la app de movil para sincronizarlos
 -definir lo de transparencia
+- para reproducir una cancion debe bastar con pinchar sobre esta, no en el boton de play
