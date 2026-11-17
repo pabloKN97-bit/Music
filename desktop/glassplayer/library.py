@@ -134,6 +134,7 @@ def load():
     data.setdefault("favorites", [])
     data.setdefault("downloads", {})
     data.setdefault("recent", [])
+    data.setdefault("news_genres", [])  # ids de los géneros favoritos de Novedades
     data["playlists"].setdefault(DOWNLOADS_PLAYLIST, [])
     return data
 

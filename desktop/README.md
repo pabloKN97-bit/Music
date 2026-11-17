@@ -41,6 +41,9 @@ Todo ocurre en segundo plano y con tus permisos de usuario: la app toma el enlac
 - Lo lanza la app sola (`tray.py`, proceso aparte) y desaparece al cerrarla. En Ubuntu funciona de serie; en GNOME "puro" hace falta la extensión *AppIndicator and KStatusNotifierItem Support*. GNOME coloca cada icono nuevo a la izquierda del anterior; si en tu equipo el orden sale distinto, no afecta al funcionamiento. Para desactivar solo los botones: `GLASSPLAYER_NO_TRAY_BUTTONS=1 glassplayer`; todo el icono: `GLASSPLAYER_NO_TRAY=1 glassplayer`.
 - El dock de GNOME no permite mostrar texto ni botones propios en el icono; por eso el título y los botones viven en la barra superior (y también en el menú del sistema y la pantalla de bloqueo, vía MPRIS).
 
+## Novedades
+En BIBLIOTECA → Novedades hay cajas de géneros musicales. Marca con la ★ los que te gusten (pasan arriba, a «Tus géneros»). Al abrir una caja salen las canciones en tendencia de ese género según Deezer (`api.deezer.com/chart/<género>/tracks`, público, sin API key); GlassPlayer las busca en YouTube y se van añadiendo a la lista según se encuentran. Se guardan de forma temporal en `news.json` (se refrescan cada 6 h y caducan a los 3 días); solo pasan a tu biblioteca si pulsas su corazón o las añades a una lista.
+
 ## YouTube
 Usa `yt-dlp`. Si deja de funcionar: `yt-dlp -U`. Las versiones recientes pueden pedir un runtime de JavaScript (deno o nodejs; el instalador pone nodejs); consulta la documentación de yt-dlp si te lo indica. Úsalo con contenido que tengas derecho a reproducir (p. ej. tu propio canal).
 

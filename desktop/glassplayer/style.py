@@ -128,6 +128,24 @@ button.panel-btn {
 button.panel-btn:hover { background: rgba(255,255,255,0.16); }
 button.swatch { min-width: 30px; min-height: 30px; padding: 0; border-radius: 999px; border: 2px solid rgba(255,255,255,0.35); box-shadow: none; }
 button.swatch:hover { border-color: #ffffff; }
+
+/* novedades: cajas de género */
+.genre-box { border-radius: 14px; min-width: 180px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 8px 20px -8px rgba(0,0,0,0.5); }
+.genre-box:hover { box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), 0 0 0 2px rgba(255,255,255,0.35), 0 10px 24px -8px rgba(0,0,0,0.6); }
+.genre-name { font-weight: 700; font-size: 17px; color: #ffffff; text-shadow: 0 1px 6px rgba(0,0,0,0.35); }
+.genre-pic { border-radius: 10px; box-shadow: 0 6px 16px -4px rgba(0,0,0,0.55); }
+.g0 { background-image: linear-gradient(135deg, #ff5d8f, #b03060); }
+.g1 { background-image: linear-gradient(135deg, #5b8def, #2a3f9e); }
+.g2 { background-image: linear-gradient(135deg, #3ec9a7, #1b6f78); }
+.g3 { background-image: linear-gradient(135deg, #f5a623, #b5541a); }
+.g4 { background-image: linear-gradient(135deg, #a66bff, #5a2a9e); }
+.g5 { background-image: linear-gradient(135deg, #ff7a59, #a82f3c); }
+.g6 { background-image: linear-gradient(135deg, #4cc3ff, #1f5f9e); }
+.g7 { background-image: linear-gradient(135deg, #8bd450, #3d7a2e); }
+button.gstar { background: rgba(0,0,0,0.25); background-image: none; border: none; box-shadow: none; color: rgba(255,255,255,0.8); border-radius: 999px; min-width: 28px; min-height: 28px; padding: 0; }
+button.gstar:hover { background: rgba(0,0,0,0.4); color: #ffffff; }
+button.gstar.on { color: #ffd60a; }
+.genre-flow { padding: 4px 2px 18px; }
 """)
 
 

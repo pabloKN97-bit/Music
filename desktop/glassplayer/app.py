@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -12,13 +13,14 @@ gi.require_version("Gst", "1.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gst, Gtk, Pango
 
-from . import downloader, library, settings, youtube
+from . import downloader, library, news, settings, youtube
 from .mpris import Mpris
 from .style import build_css
 
 V, H = Gtk.Orientation.VERTICAL, Gtk.Orientation.HORIZONTAL
 START, CENTER = Gtk.Align.START, Gtk.Align.CENTER
-TITLES = {"recent": "Recientes", "songs": "Canciones", "favs": "Favoritos", "yt": "YouTube", "queue": "Cola"}
+TITLES = {"recent": "Recientes", "songs": "Canciones", "favs": "Favoritos", "news": "Novedades", "yt": "YouTube",
+          "queue": "Cola"}
 QUEUE_REST_MAX = 200  # canciones «a continuación» que se listan en la vista Cola
 PHONE_W, PHONE_H, PHONE_COVER = 390, 780, 300
 COLOR_FIELDS = (("accent", "Color de acento"), ("bg_top", "Fondo (arriba)"),
@@ -57,6 +59,9 @@ class App(Gtk.Application):
         self.recent_view = [t["uri"] for t in self.lib["recent"]]
         self.sc, self._rows, self._rendered_view, self._scroll_target = None, [], None, None
         self.win = self.mpris = self._dlg = None
+        # Novedades: géneros y tendencias en memoria (copia temporal en news.json) y su estado de carga
+        self.news_genres, self.news_tracks, self.news_status = [], {}, {}
+        self._news_busy, self._genres_busy, self.genres_status = set(), False, ""
         self._held = self._bg_hint = False  # segundo plano: la app se mantiene viva con la ventana oculta
         self._token = 0
         # estilo, modo móvil, descargas y bandeja
@@ -228,7 +233,13 @@ class App(Gtk.Application):
         self.btn_add.set_valign(CENTER)
         self.btn_clear = button("btn-ghost", self.clear_queue, text="Vaciar cola")
         self.btn_clear.set_valign(CENTER)
+        self.btn_back = button("btn-ghost", lambda: self.set_view("news"), text="←  Novedades")
+        self.btn_gfav = button("btn-ghost", lambda: self.toggle_genre(self.view[5:]), text="☆  Favorito")
+        for b in (self.btn_back, self.btn_gfav):
+            b.set_valign(CENTER)
+        head.append(self.btn_back)
         head.append(titles)
+        head.append(self.btn_gfav)
         head.append(self.btn_add)
         head.append(self.btn_clear)
         head.append(self.btn_dl)
@@ -239,7 +250,13 @@ class App(Gtk.Application):
         self.sc = sc = Gtk.ScrolledWindow(vexpand=True)
         sc.set_child(self.lst)
         sc.get_vadjustment().connect("changed", self.on_scroll_range)
-        for x in (head, self.l_status, sc):
+        self.grid_box = Gtk.Box(orientation=V, spacing=8)
+        gsc = Gtk.ScrolledWindow(vexpand=True)
+        gsc.set_child(self.grid_box)
+        self.stack = Gtk.Stack(vexpand=True)
+        self.stack.add_named(sc, "list")
+        self.stack.add_named(gsc, "grid")
+        for x in (head, self.l_status, self.stack):
             main.append(x)
         shell.append(self.build_transport())
 
@@ -342,7 +359,7 @@ class App(Gtk.Application):
         box.append(label(text, hexpand=True))
         b.set_child(box)
         b.add_css_class("side-item")
-        if key == self.view:
+        if key == self.view or (key == "news" and self.view.startswith("news:")):
             b.add_css_class("on")
         b.connect("clicked", lambda _b: self.set_view(key))
         return b
@@ -351,7 +368,7 @@ class App(Gtk.Application):
         self.clear(self.side_box)
         sb = self.side_box
         sb.append(label("BIBLIOTECA", "side-title"))
-        for key, icon in (("recent", "document-open-recent-symbolic"), ("songs", "audio-x-generic-symbolic"), ("favs", "emblem-favorite-symbolic"), ("yt", "web-browser-symbolic"), ("queue", "view-list-ordered-symbolic")):
+        for key, icon in (("recent", "document-open-recent-symbolic"), ("songs", "audio-x-generic-symbolic"), ("favs", "emblem-favorite-symbolic"), ("news", "view-grid-symbolic"), ("yt", "web-browser-symbolic"), ("queue", "view-list-ordered-symbolic")):
             sb.append(self.nav_item(key, icon, TITLES[key]))
         sb.append(label("LISTAS", "side-title"))
         for name in self.lib["playlists"]:
@@ -374,6 +391,10 @@ class App(Gtk.Application):
             self.recent_view = [t["uri"] for t in self.lib["recent"]]
         self.render_sidebar()
         self.render_main()
+        if key == "news":
+            self.load_genres()
+        elif key.startswith("news:"):
+            self.load_chart(key[5:])
 
     def view_tracks(self):
         if self.view == "recent":
@@ -386,14 +407,34 @@ class App(Gtk.Application):
             return [t for t in self.lib["tracks"] if t["uri"] in self.lib["favorites"]]
         if self.view == "yt":
             return self.yt_results
+        if self.view.startswith("news:"):  # solo las ya encontradas en YouTube
+            return [t for t in self.news_tracks.get(self.view[5:], []) if t.get("uri")]
         if self.view == "queue":
             return [it[1] for it in self.queue_items() if it[0] == "track"]
         by = {t["uri"]: t for t in self.lib["tracks"]}
         return [by[u] for u in self.lib["playlists"].get(self.view[3:], []) if u in by]
 
     def render_main(self):
+        in_genre = self.view.startswith("news:")
+        self.btn_back.set_visible(in_genre)
+        self.btn_gfav.set_visible(in_genre)
+        self.stack.set_visible_child_name("grid" if self.view == "news" else "list")
+        if self.view == "news":
+            self.l_page.set_label(TITLES["news"])
+            self.l_crumb.set_label("BIBLIOTECA")
+            self.refresh_status()
+            for b in (self.btn_all, self.btn_dl, self.btn_add, self.btn_clear):
+                b.set_visible(False)
+            self.render_news_grid()
+            return
         tr = self.view_tracks()
-        if self.view.startswith("pl:"):
+        if in_genre:
+            g = self.genre(self.view[5:])
+            self.l_page.set_label(g["name"] if g else "Género")
+            self.l_crumb.set_label("NOVEDADES · TENDENCIAS")
+            fav = self.view[5:] in self.lib["news_genres"]
+            self.btn_gfav.set_label("★  Favorito" if fav else "☆  Favorito")
+        elif self.view.startswith("pl:"):
             self.l_page.set_label(self.view[3:])
             self.l_crumb.set_label("LISTA")
         elif self.view == "queue":
@@ -447,6 +488,10 @@ class App(Gtk.Application):
         tr = self.view_tracks()
         if self.view == "yt":
             return self.yt_status or ("" if tr else "Escribe en la barra superior y pulsa Intro para buscar en YouTube")
+        if self.view == "news":
+            return self.genres_status or ("" if self.news_genres else "Sin géneros")
+        if self.view.startswith("news:"):
+            return self.news_status.get(self.view[5:], "") or ("" if tr else "Sin canciones por ahora")
         if self.view == "recent":
             return "" if tr else "Aún no has escuchado nada: elige una canción y aparecerá aquí"
         if self.view == "queue":
@@ -816,6 +861,145 @@ class App(Gtk.Application):
             self.render_main()  # la miniatura de la fila cambia; la posición del scroll se conserva
             library.save(self.lib)
 
+    # ------------------------------------------------------------ Novedades (tendencias de Deezer + YouTube)
+    def genre(self, gid):
+        return next((g for g in self.news_genres if g["id"] == gid), None)
+
+    def load_genres(self):
+        if self.news_genres or self._genres_busy:
+            return
+        self._genres_busy = True
+        self.genres_status = "Cargando géneros…"
+        self.refresh_status()
+
+        def work():
+            try:
+                res = news.genres()
+            except Exception:
+                res = None
+            GLib.idle_add(self._genres_done, res)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _genres_done(self, res):
+        self._genres_busy = False
+        self.genres_status = "" if res else "No se pudo conectar con Deezer. Comprueba tu conexión."
+        self.news_genres = res or []
+        if self.view == "news":
+            self.render_main()
+        elif self.view.startswith("news:"):
+            self.render_main()  # ya se puede mostrar el nombre del género
+
+    def render_news_grid(self):
+        self.clear(self.grid_box)
+        favs = [g for g in self.news_genres if g["id"] in self.lib["news_genres"]]
+        rest = [g for g in self.news_genres if g["id"] not in self.lib["news_genres"]]
+        for title, items in (("TUS GÉNEROS", favs), ("TODOS LOS GÉNEROS" if favs else "GÉNEROS", rest)):
+            if not items:
+                continue
+            self.grid_box.append(label(title, "side-title"))
+            fb = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True, valign=START,
+                             min_children_per_line=2, max_children_per_line=6, column_spacing=14, row_spacing=14)
+            fb.add_css_class("genre-flow")
+            for g in items:
+                fb.append(self.genre_tile(g))
+            self.grid_box.append(fb)
+
+    def genre_tile(self, g):
+        ov = Gtk.Overlay()
+        ov.set_size_request(180, 112)
+        ov.set_overflow(Gtk.Overflow.HIDDEN)
+        ov.add_css_class("genre-box")
+        ov.add_css_class(f"g{int(g['id']) % 8}")
+        ov.set_child(Gtk.Box())
+        pic = Gtk.Picture(halign=Gtk.Align.END, valign=Gtk.Align.END, margin_end=8, margin_bottom=8)
+        pic.set_can_shrink(True)
+        pic.set_size_request(86, 86)
+        pic.add_css_class("genre-pic")
+        if g.get("picture"):
+            self.async_thumb(pic, g["picture"])
+        ov.add_overlay(pic)
+        ov.add_overlay(label(g["name"], "genre-name", halign=START, valign=START, margin_start=14, margin_top=12,
+                             max_width_chars=14))
+        fav = g["id"] in self.lib["news_genres"]
+        star = Gtk.Button(icon_name="starred-symbolic" if fav else "non-starred-symbolic",
+                          halign=Gtk.Align.END, valign=START, margin_end=6, margin_top=6)
+        star.add_css_class("gstar")
+        if fav:
+            star.add_css_class("on")
+        star.set_tooltip_text("Quitar de favoritos" if fav else "Marcar como favorito")
+        star.connect("clicked", lambda _b: self.toggle_genre(g["id"]))
+        ov.add_overlay(star)
+        click = Gtk.GestureClick()
+        click.connect("released", lambda *_: self.set_view("news:" + g["id"]))
+        ov.add_controller(click)
+        ov.set_cursor_from_name("pointer")
+        return ov
+
+    def toggle_genre(self, gid):
+        favs = self.lib["news_genres"]
+        favs.remove(gid) if gid in favs else favs.append(gid)
+        library.save(self.lib)
+        self.render_main()
+
+    def load_chart(self, gid):
+        """Hilo 1: tendencias de Deezer. Hilo 2: busca en YouTube las canciones que aún no tienen enlace."""
+        if gid in self._news_busy:
+            return
+        self._news_busy.add(gid)
+        if gid not in self.news_tracks:
+            self.news_status[gid] = "Cargando tendencias…"
+            self.refresh_status()
+
+        def work():
+            try:
+                tracks = news.chart(gid)
+            except Exception:
+                tracks = None
+            GLib.idle_add(self._chart_done, gid, tracks)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _chart_done(self, gid, tracks):
+        if tracks is None:
+            self._news_busy.discard(gid)
+            if gid not in self.news_tracks:
+                self.news_status[gid] = "No se pudo conectar con Deezer. Comprueba tu conexión."
+            self.render_main()
+            return
+        self.news_tracks[gid] = tracks
+        pending = [t for t in tracks if not t.get("uri")]
+        if pending and not youtube.available():
+            self._news_busy.discard(gid)
+            self.news_status[gid] = "Falta yt-dlp: ejecuta ./install.sh"
+        elif pending:
+            self.news_status[gid] = f"Buscando en YouTube… 0/{len(pending)}"
+
+            def work():
+                with ThreadPoolExecutor(max_workers=3) as ex:  # map respeta el orden de las tendencias
+                    for i, _ok in enumerate(ex.map(news.resolve, pending), 1):
+                        GLib.idle_add(self._chart_progress, gid, i, len(pending))
+            threading.Thread(target=work, daemon=True).start()
+        else:
+            self._news_busy.discard(gid)
+            self.news_status[gid] = ""
+        if self.view == "news:" + gid:
+            self.render_main()
+
+    def _chart_progress(self, gid, done, total):
+        finished = done == total
+        if finished:
+            self._news_busy.discard(gid)
+            news.save()
+            self.news_status[gid] = ""
+        else:
+            self.news_status[gid] = f"Buscando en YouTube… {done}/{total}"
+        if self.view != "news:" + gid:
+            return
+        # redibujar solo de vez en cuando para que la lista no parpadee
+        if finished or done == 1 or done % 4 == 0:
+            self.render_main()
+        else:
+            self.refresh_status()
+
     # ------------------------------------------------------------ YouTube
     def yt_search(self, q):
         q = q.strip()
@@ -906,7 +1090,8 @@ class App(Gtk.Application):
             url = None
         path = None
         if url and not t.get("cover"):
-            data = youtube.thumbnail(t["uri"])
+            data = youtube.download(t["cover_url"]) if t.get("cover_url") else None  # portada HD de Deezer
+            data = data or youtube.thumbnail(t["uri"])
             path = library.save_cover(data) if data else None
         GLib.idle_add(self._resolved, t, token, url, path)
 
