@@ -14,7 +14,7 @@ gi.require_version("Gst", "1.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gst, Gtk, Pango
 
-from . import downloader, library, news, settings, youtube
+from . import audiocache, downloader, library, news, settings, youtube
 from .mpris import Mpris
 from .style import build_css
 
@@ -66,6 +66,7 @@ class App(Gtk.Application):
         self._held = self._bg_hint = False  # segundo plano: la app se mantiene viva con la ventana oculta
         self._token = 0
         self._buffering = False  # GStreamer está rellenando el búfer: las tareas en segundo plano esperan
+        self._preload_token, self._prefetch_uri = None, None  # canción que se está precargando / siguiente ya en marcha
         self._img_cache, self._img_pool = {}, ThreadPoolExecutor(max_workers=3)  # miniaturas: caché y hilos acotados
         # estilo, modo móvil, descargas y bandeja
         self.theme = settings.load()
@@ -185,9 +186,10 @@ class App(Gtk.Application):
             self.gst.set_state(Gst.State.PAUSED if pct < 100 else Gst.State.PLAYING)
 
     def wait_playback_idle(self):
-        """Hilo en segundo plano: espera (máx. 60 s) a que la reproducción no esté cargando."""
-        end = time.monotonic() + 60
-        while self._buffering and time.monotonic() < end:
+        """Hilo en segundo plano: espera (máx. 90 s) a que la canción que se pulsó esté cargada y sonando:
+        primero la canción, después el resto."""
+        end = time.monotonic() + 90
+        while (self._buffering or self._preload_token is not None) and time.monotonic() < end:
             time.sleep(0.5)
 
     def on_gst_error(self, _bus, msg):
@@ -1094,9 +1096,11 @@ class App(Gtk.Application):
         library.push_recent(self.lib, t)  # «Recientes»: la lista visible no se recoloca hasta volver a entrar
         library.save(self.lib)
         self.gst.set_state(Gst.State.NULL)
+        self._buffering = False
+        self._preload_token = self._token if youtube.is_yt(t["uri"]) else None  # las búsquedas de fondo esperan
         self.show_track()
         if youtube.is_yt(t["uri"]):
-            self.set_subtitle("Cargando desde YouTube…")
+            self.set_subtitle("Cargando canción… 0 %")
             threading.Thread(target=self._resolve, args=(t, self._token), daemon=True).start()
         else:
             self._start(t["uri"])
@@ -1106,19 +1110,61 @@ class App(Gtk.Application):
         self.gst.set_state(Gst.State.PLAYING)
 
     def _resolve(self, t, token):
-        """Hilo: obtiene la URL de audio y, si falta, la portada (miniatura del vídeo)."""
+        """Hilo: descarga la canción ENTERA (con progreso) y solo entonces empieza a sonar, desde disco: sin cortes
+        aunque la conexión falle después. Si la descarga falla, plan B: streaming directo como antes."""
+        self._preload_token = token
+        play = None
         try:
-            url = youtube.stream_url(t["uri"])
+            play = GLib.filename_to_uri(audiocache.fetch(
+                t["uri"], on_progress=lambda p: GLib.idle_add(self._load_progress, token, p),
+                cancel=lambda: token != self._token))
+        except audiocache.Cancelled:
+            return  # el usuario cambió de canción: la nueva se encarga
         except Exception:
-            url = None
-        path = None
-        if url and not t.get("cover"):
+            if token == self._token:
+                try:
+                    play = youtube.stream_url(t["uri"])
+                except Exception:
+                    play = None
+        finally:
+            if self._preload_token == token:
+                self._preload_token = None
+        GLib.idle_add(self._resolved, t, token, play)
+        if play and not t.get("cover"):  # la portada llega después: no retrasa el inicio de la canción
             data = youtube.download(t["cover_url"]) if t.get("cover_url") else None  # portada HD de Deezer
             data = data or youtube.thumbnail(t["uri"])
             path = library.save_cover(data) if data else None
-        GLib.idle_add(self._resolved, t, token, url, path)
+            if path:
+                GLib.idle_add(self._cover_ready, t, path)
 
-    def _resolved(self, t, token, url, path):
+    def _load_progress(self, token, pct):
+        if token == self._token:
+            self.set_subtitle(f"Cargando canción… {pct:.0f} %")
+
+    def prefetch_next(self):
+        """Mientras suena la actual, descarga ya la siguiente (cola o lista) para que el cambio sea instantáneo."""
+        if self.up_next:
+            nxt = self.up_next[0]
+        elif self.queue:
+            nxt = self.queue[(self.idx + 1) % len(self.queue)]
+        else:
+            return
+        uri = nxt["uri"]
+        if not youtube.is_yt(uri) or self._prefetch_uri == uri or audiocache.cached(uri):
+            return
+        self._prefetch_uri, token = uri, self._token
+
+        def work():
+            try:
+                audiocache.fetch(uri, low_priority=True, cancel=lambda: token != self._token)
+            except Exception:
+                pass
+            finally:
+                if self._prefetch_uri == uri:
+                    self._prefetch_uri = None
+        threading.Thread(target=work, daemon=True).start()
+
+    def _cover_ready(self, t, path):
         if path and not t.get("cover"):
             t["cover"] = path
             for x in self.lib["tracks"]:
@@ -1131,10 +1177,17 @@ class App(Gtk.Application):
                 if r["uri"] == t["uri"]:
                     self.set_pic(r["th"], path, 40)
             library.save(self.lib)
+            if self.current() is t:
+                self.set_pic(self.t_cover, path, 54)
+                self.update_bg()
+                self.update_phone()
+
+    def _resolved(self, t, token, url):
         if token != self._token:
             return
         if url:
             self._start(url)
+            self.prefetch_next()
         else:
             self.playing = False
         self.show_track()

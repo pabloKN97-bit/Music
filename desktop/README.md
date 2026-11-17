@@ -44,6 +44,9 @@ Todo ocurre en segundo plano y con tus permisos de usuario: la app toma el enlac
 ## Novedades
 En BIBLIOTECA → Novedades hay cajas de géneros musicales. Marca con la ★ los que te gusten (pasan arriba, a «Tus géneros»). Al abrir una caja salen las canciones en tendencia de ese género según Deezer (`api.deezer.com/chart/<género>/tracks`, público, sin API key); GlassPlayer las busca en YouTube y se van añadiendo a la lista según se encuentran. Se guardan de forma temporal en `news.json` (se refrescan cada 6 h y caducan a los 3 días); solo pasan a tu biblioteca si pulsas su corazón o las añades a una lista.
 
+## Reproducción sin cortes
+Al pulsar una canción de YouTube se descarga entera (se ve el porcentaje) y suena desde disco, así una conexión lenta no la corta a medias. Mientras suena se descarga ya la siguiente y se siguen cargando las novedades. Los audios son temporales (`~/.local/share/glassplayer/audio`, se conservan los últimos 40).
+
 ## YouTube
 Usa `yt-dlp`. Si deja de funcionar: `yt-dlp -U`. Las versiones recientes pueden pedir un runtime de JavaScript (deno o nodejs; el instalador pone nodejs); consulta la documentación de yt-dlp si te lo indica. Úsalo con contenido que tengas derecho a reproducir (p. ej. tu propio canal).
 
