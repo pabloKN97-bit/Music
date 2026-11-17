@@ -25,9 +25,11 @@ def download(url):
         return None
 
 
-def search(q, n=15):
-    """Busca vídeos; devuelve pistas con el mismo formato que la biblioteca."""
-    out = subprocess.run(["yt-dlp", "--flat-playlist", "--dump-json", "--no-warnings", f"ytsearch{n}:{q}"],
+def search(q, n=15, low_priority=False):
+    """Busca vídeos; devuelve pistas con el mismo formato que la biblioteca.
+    low_priority: se ejecuta con la mínima prioridad de CPU (búsquedas en segundo plano mientras suena música)."""
+    pre = ["nice", "-n", "19"] if low_priority and shutil.which("nice") else []
+    out = subprocess.run(pre + ["yt-dlp", "--flat-playlist", "--dump-json", "--no-warnings", f"ytsearch{n}:{q}"],
                          capture_output=True, text=True, timeout=45, check=True)
     res = []
     for line in out.stdout.splitlines():

@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import gi
@@ -64,6 +65,8 @@ class App(Gtk.Application):
         self._news_busy, self._genres_busy, self.genres_status = set(), False, ""
         self._held = self._bg_hint = False  # segundo plano: la app se mantiene viva con la ventana oculta
         self._token = 0
+        self._buffering = False  # GStreamer está rellenando el búfer: las tareas en segundo plano esperan
+        self._img_cache, self._img_pool = {}, ThreadPoolExecutor(max_workers=3)  # miniaturas: caché y hilos acotados
         # estilo, modo móvil, descargas y bandeja
         self.theme = settings.load()
         self.css = self.phone = self.panel = self.p_bg = self._tray = None
@@ -75,6 +78,8 @@ class App(Gtk.Application):
         bus.add_signal_watch()
         bus.connect("message::eos", lambda *_: self.go_next())
         bus.connect("message::error", self.on_gst_error)
+        bus.connect("message::buffering", self.on_buffering)
+        self.gst.set_property("buffer-duration", 20 * Gst.SECOND)  # hasta 20 s de audio por adelantado
 
     # ------------------------------------------------------------ ciclo de vida
     def do_startup(self):
@@ -171,6 +176,19 @@ class App(Gtk.Application):
                                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         except OSError as e:
             print("GlassPlayer: no se pudo iniciar el icono de la barra superior:", e)
+
+    def on_buffering(self, _bus, msg):
+        """Si llega menos audio del que se consume, pausa hasta rellenar el búfer (en vez de entrecortarse)."""
+        pct = msg.parse_buffering()
+        self._buffering = pct < 100
+        if self.playing:
+            self.gst.set_state(Gst.State.PAUSED if pct < 100 else Gst.State.PLAYING)
+
+    def wait_playback_idle(self):
+        """Hilo en segundo plano: espera (máx. 60 s) a que la reproducción no esté cargando."""
+        end = time.monotonic() + 60
+        while self._buffering and time.monotonic() < end:
+            time.sleep(0.5)
 
     def on_gst_error(self, _bus, msg):
         print("GStreamer:", msg.parse_error()[0])
@@ -332,10 +350,14 @@ class App(Gtk.Application):
 
     def async_thumb(self, pic, url):
         def work():
-            d = youtube.download(url)
+            d = self._img_cache.get(url)
+            if d is None:
+                d = youtube.download(url)
+                if d:
+                    self._img_cache[url] = d
             if d:
                 GLib.idle_add(self._set_tex, pic, d)
-        threading.Thread(target=work, daemon=True).start()
+        self._img_pool.submit(work)
 
     def _set_tex(self, pic, data):
         try:
@@ -974,9 +996,10 @@ class App(Gtk.Application):
             self.news_status[gid] = f"Buscando en YouTube… 0/{len(pending)}"
 
             def work():
-                with ThreadPoolExecutor(max_workers=3) as ex:  # map respeta el orden de las tendencias
-                    for i, _ok in enumerate(ex.map(news.resolve, pending), 1):
-                        GLib.idle_add(self._chart_progress, gid, i, len(pending))
+                # una búsqueda cada vez, con prioridad mínima y esperando si la música está cargando
+                for i, t in enumerate(pending, 1):
+                    news.resolve(t, self.wait_playback_idle)
+                    GLib.idle_add(self._chart_progress, gid, i, len(pending))
             threading.Thread(target=work, daemon=True).start()
         else:
             self._news_busy.discard(gid)

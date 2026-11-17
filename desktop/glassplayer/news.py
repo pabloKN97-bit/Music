@@ -108,7 +108,7 @@ def _from_deezer(d):
     return {"uri": None, "title": d.get("title_short") or d.get("title") or "Sin título",
             "artist": (d.get("artist") or {}).get("name") or "Artista desconocido",
             "album": al.get("title") or "", "duration": d.get("duration") or 0, "cover": None,
-            "thumb": al.get("cover_medium") or "", "cover_url": al.get("cover_xl") or al.get("cover_big") or "",
+            "thumb": al.get("cover_medium") or "", "cover_url": al.get("cover_big") or al.get("cover_xl") or "",
             "dz_id": d.get("id")}
 
 
@@ -146,12 +146,15 @@ def pick_match(results, duration):
     return results[0]
 
 
-def resolve(t):
-    """Busca la canción en YouTube y rellena t['uri']. Devuelve True si la encontró."""
+def resolve(t, wait=None):
+    """Busca la canción en YouTube y rellena t['uri']. Devuelve True si la encontró.
+    wait: función opcional que espera mientras la reproducción esté cargando (no compite por la conexión)."""
     if t.get("uri"):
         return True
+    if wait:
+        wait()
     try:
-        hit = pick_match(youtube.search(f"{t['artist']} {t['title']}", n=5), t.get("duration"))
+        hit = pick_match(youtube.search(f"{t['artist']} {t['title']}", n=3, low_priority=True), t.get("duration"))
     except Exception:
         return False
     if not hit:
