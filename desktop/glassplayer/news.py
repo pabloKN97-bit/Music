@@ -27,6 +27,11 @@ CHART_TTL = 6 * 3600          # pasado este tiempo se vuelve a pedir la lista a 
 GENRES_TTL = 7 * 24 * 3600
 PURGE_AFTER = 3 * 24 * 3600   # lo que no se ha tocado en 3 días se borra de la caché
 CHART_SIZE = 25
+# Deezer mete mucho trap/reguetón latino en los charts de otros géneros (rap, pop…). Con esto, esas canciones solo
+# salen en los géneros latinos; en el resto se descartan. Pon EXCLUDE_LATIN = False para desactivarlo.
+EXCLUDE_LATIN = True
+LATIN = ("197", "122", "67", "71")  # Latino, Reggaeton, Salsa, Cumbia
+CHART_VERSION = 2                   # sube al cambiar cómo se construye una lista: invalida las cachés antiguas
 DURATION_TOLERANCE = 15       # segundos de diferencia aceptados entre Deezer y YouTube
 
 NAMES_ES = {
@@ -118,18 +123,28 @@ def chart(gid, limit=CHART_SIZE):
     charts = _load()["charts"]
     old = charts.get(gid)
     now = time.time()
-    if old and now - old.get("fetched", 0) < CHART_TTL:
+    if old and old.get("v") == CHART_VERSION and now - old.get("fetched", 0) < CHART_TTL:
         old["seen"] = now
         return old["tracks"]
+    exclude = EXCLUDE_LATIN and gid not in LATIN and gid != "0"
     try:
-        raw = _get(f"chart/{gid}/tracks", limit=limit).get("data", [])
+        raw = _get(f"chart/{gid}/tracks", limit=limit * 2 if exclude else limit).get("data", [])
     except Exception:
         if old:  # sin conexión: mejor la lista caducada que nada
             return old["tracks"]
         raise
+    if exclude:
+        banned = set()
+        for lg in LATIN:
+            try:
+                banned |= {t["dz_id"] for t in chart(lg)}
+            except Exception:
+                pass
+        raw = [d for d in raw if d.get("id") not in banned]
+    raw = raw[:limit]
     known = {t["dz_id"]: t for t in (old or {}).get("tracks", [])}
     tracks = [known.get(d.get("id")) or _from_deezer(d) for d in raw]
-    charts[gid] = {"fetched": now, "seen": now, "tracks": tracks}
+    charts[gid] = {"v": CHART_VERSION, "fetched": now, "seen": now, "tracks": tracks}
     save()
     return tracks
 
