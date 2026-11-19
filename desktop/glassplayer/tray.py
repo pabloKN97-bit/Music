@@ -243,7 +243,7 @@ class Tray:
         self.i_prev.set_sensitive(bool(props.get("CanGoPrevious")))
         self.i_next.set_sensitive(bool(props.get("CanGoNext")))
         label = short(title) if title else ""
-        self.ind.set_label(label, label)  # texto junto al icono, en la barra superior
+        self.ind.set_label("", "")  # texto junto al icono, en la barra superior
         self.ind.set_title(full or "GlassPlayer")
         self.update_buttons(full, playing, props)
 
