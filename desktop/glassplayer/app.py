@@ -1,6 +1,7 @@
 """Interfaz GTK4 estilo Apple Music "glass": barra de título, barra lateral, lista y barra de reproducción.
 Incluye modo móvil, estilo personalizable, descarga de canciones y control desde la barra superior."""
 import os
+import random
 import subprocess
 import sys
 import threading
@@ -66,6 +67,7 @@ class App(Gtk.Application):
         self._held = self._bg_hint = False  # segundo plano: la app se mantiene viva con la ventana oculta
         self._token = 0
         self._buffering = False  # GStreamer está rellenando el búfer: las tareas en segundo plano esperan
+        self._shuffled = False  # la cola actual viene del botón «Aleatorio»
         self._preload_token, self._prefetch_uri = None, None  # canción que se está precargando / siguiente ya en marcha
         self._img_cache, self._img_pool = {}, ThreadPoolExecutor(max_workers=3)  # miniaturas: caché y hilos acotados
         # estilo, modo móvil, descargas y bandeja
@@ -247,6 +249,8 @@ class App(Gtk.Application):
         titles.append(self.l_page)
         self.btn_all = button("btn-primary", self.play_all, text="▶  Reproducir")
         self.btn_all.set_valign(CENTER)
+        self.btn_shuffle = button("btn-ghost", self.play_shuffled, text="🔀  Aleatorio")
+        self.btn_shuffle.set_valign(CENTER)
         self.btn_dl = button("btn-ghost", self.download_view, text="⬇  Descargar")
         self.btn_dl.set_valign(CENTER)
         self.btn_add = button("btn-ghost", self.open_add_dialog, text="＋  Añadir canciones")
@@ -263,6 +267,7 @@ class App(Gtk.Application):
         head.append(self.btn_add)
         head.append(self.btn_clear)
         head.append(self.btn_dl)
+        head.append(self.btn_shuffle)
         head.append(self.btn_all)
         self.l_status = label("", "sub")
         self.lst = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
@@ -447,7 +452,7 @@ class App(Gtk.Application):
             self.l_page.set_label(TITLES["news"])
             self.l_crumb.set_label("BIBLIOTECA")
             self.refresh_status()
-            for b in (self.btn_all, self.btn_dl, self.btn_add, self.btn_clear):
+            for b in (self.btn_all, self.btn_shuffle, self.btn_dl, self.btn_add, self.btn_clear):
                 b.set_visible(False)
             self.render_news_grid()
             return
@@ -471,6 +476,7 @@ class App(Gtk.Application):
         self.btn_all.set_visible(bool(tr) and self.view != "queue")
         self.btn_clear.set_visible(self.view == "queue" and bool(self.up_next))
         self.btn_add.set_visible(self.view.startswith("pl:"))  # solo dentro de una lista creada
+        self.btn_shuffle.set_visible(self.view.startswith("pl:") and len(tr) > 1)  # aleatorio: solo en listas creadas
         self.l_qcount.set_label(str(len(self.up_next)) if self.up_next else "")
         todo = [t for t in tr if self.dl_state(t) == "todo"]
         self.btn_dl.set_visible(bool(todo))
@@ -1076,7 +1082,17 @@ class App(Gtk.Application):
 
     def play_list(self, tracks, i):
         self.queue = list(tracks)
+        self._shuffled = False  # reproducción normal: respeta el orden de la lista
         self.play_index(i)
+
+    def play_shuffled(self):
+        """Reproduce la lista visible en orden aleatorio: todas las canciones una vez, sin repetir."""
+        tr = list(self.view_tracks())
+        if not tr:
+            return
+        random.shuffle(tr)
+        self.play_list(tr, 0)
+        self._shuffled = True  # al llegar al final se vuelve a barajar en vez de repetir el mismo orden
 
     def play_all(self):
         tr = self.view_tracks()
@@ -1214,7 +1230,13 @@ class App(Gtk.Application):
         if self.up_next:  # la cola del usuario tiene prioridad; después sigue la lista por donde iba
             self._play(self.up_next.pop(0))
         elif self.queue:
-            self.play_index((self.idx + 1) % len(self.queue))
+            nxt = self.idx + 1
+            if nxt >= len(self.queue) and self._shuffled and len(self.queue) > 1:
+                last = self.queue[-1]
+                random.shuffle(self.queue)
+                if self.queue[0] is last:  # que la última no se repita justo al empezar la nueva vuelta
+                    self.queue[0], self.queue[-1] = self.queue[-1], self.queue[0]
+            self.play_index(nxt % len(self.queue))
         elif self._cur:
             self._play(self._cur)
 
