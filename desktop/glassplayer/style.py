@@ -67,6 +67,7 @@ button.btn-primary {
 }
 button.btn-ghost { background: rgba(0,0,0,0.28); background-image: none; color: #fff; border: 1px solid rgba(255,255,255,0.32); border-radius: 999px; padding: 9px 18px; font-weight: 600; }
 button.btn-ghost:hover { background: rgba(0,0,0,0.42); }
+button.btn-ghost.on, button.btn-ghost.on:hover { background: $accent; background-image: none; border-color: $accent; }
 button.ibtn, button.heart, button.cbtn {
   background: transparent; background-image: none; border: none; box-shadow: none;
   color: rgba($text_rgb,0.55); border-radius: 8px;
