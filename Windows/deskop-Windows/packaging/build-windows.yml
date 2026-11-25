@@ -1,0 +1,57 @@
+# Copia este archivo a  .github/workflows/build-windows.yml  en la raíz del repositorio.
+# Cada vez que cambies algo en deskop-Windows (o pulses «Run workflow») GitHub construye el instalador.
+name: Build Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "deskop-Windows/**"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: deskop-Windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: deskop-Windows/requirements-build.txt
+
+      - name: Instalar dependencias
+        run: python -m pip install -r requirements-build.txt
+
+      - name: Descargar yt-dlp, ffmpeg y deno
+        shell: pwsh
+        run: ./packaging/fetch_tools.ps1
+
+      - name: Generar la aplicación (PyInstaller)
+        run: pyinstaller packaging/glassplayer.spec --noconfirm --distpath dist --workpath build
+
+      - name: Comprobar que la app arranca y decodifica audio
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "selftest.txt"
+          $p = Start-Process "dist/GlassPlayer/GlassPlayer.exe" -ArgumentList "--selftest", $out -PassThru -Wait
+          if (-not (Test-Path $out)) { throw "La app no llegó a arrancar (código $($p.ExitCode))" }
+          $line = Get-Content $out
+          Write-Host $line
+          foreach ($need in "decode=True", "yt-dlp=True", "ffmpeg=True", "deno=True") {
+            if ($line -notmatch [regex]::Escape($need)) { throw "Autocomprobación fallida: falta $need" }
+          }
+
+      - name: Crear el instalador (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "packaging\installer.iss"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GlassPlayer-Windows-Setup
+          path: deskop-Windows/installer_output/GlassPlayer-Setup.exe

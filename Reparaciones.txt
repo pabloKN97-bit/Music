@@ -4,7 +4,8 @@ Secundario
 
 - los botones de la barra de tareas deben ser funcionales, es decir si se pincha en el nombre, te debe abrir la app, si pinchas en pausa se pausa, en anterior reproduce la cancion anterior y en siguiente la cancion siguiente
 - Con el boton de espacio del teclado se debe poder pausar la cancion al tener la aplicacion abierta en primer plano
-- 
+- añadir aleaotiro
+- optimizar funciones, eliminar rebundantes
 
 
 No desarrollar aun 

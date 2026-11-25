@@ -1,0 +1,148 @@
+From aff9f3a717ed367374a2563fe4d9547b77a9a479 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 17 Nov 2026 19:50:25 +0000
+Subject: [PATCH] Novedades: evita cortes de reproduccion (busquedas en segundo
+ plano de una en una y con prioridad minima, cache de miniaturas, gestion del
+ buffering de GStreamer)
+
+---
+ desktop/glassplayer/app.py     | 33 ++++++++++++++++++++++++++++-----
+ desktop/glassplayer/news.py    | 11 +++++++----
+ desktop/glassplayer/youtube.py |  8 +++++---
+ 3 files changed, 40 insertions(+), 12 deletions(-)
+
+diff --git a/desktop/glassplayer/app.py b/desktop/glassplayer/app.py
+index 725f719..fd5a306 100755
+--- a/desktop/glassplayer/app.py
++++ b/desktop/glassplayer/app.py
+@@ -4,6 +4,7 @@ import os
+ import subprocess
+ import sys
+ import threading
++import time
+ from concurrent.futures import ThreadPoolExecutor
+ 
+ import gi
+@@ -64,6 +65,8 @@ class App(Gtk.Application):
+         self._news_busy, self._genres_busy, self.genres_status = set(), False, ""
+         self._held = self._bg_hint = False  # segundo plano: la app se mantiene viva con la ventana oculta
+         self._token = 0
++        self._buffering = False  # GStreamer está rellenando el búfer: las tareas en segundo plano esperan
++        self._img_cache, self._img_pool = {}, ThreadPoolExecutor(max_workers=3)  # miniaturas: caché y hilos acotados
+         # estilo, modo móvil, descargas y bandeja
+         self.theme = settings.load()
+         self.css = self.phone = self.panel = self.p_bg = self._tray = None
+@@ -75,6 +78,8 @@ class App(Gtk.Application):
+         bus.add_signal_watch()
+         bus.connect("message::eos", lambda *_: self.go_next())
+         bus.connect("message::error", self.on_gst_error)
++        bus.connect("message::buffering", self.on_buffering)
++        self.gst.set_property("buffer-duration", 20 * Gst.SECOND)  # hasta 20 s de audio por adelantado
+ 
+     # ------------------------------------------------------------ ciclo de vida
+     def do_startup(self):
+@@ -172,6 +177,19 @@ class App(Gtk.Application):
+         except OSError as e:
+             print("GlassPlayer: no se pudo iniciar el icono de la barra superior:", e)
+ 
++    def on_buffering(self, _bus, msg):
++        """Si llega menos audio del que se consume, pausa hasta rellenar el búfer (en vez de entrecortarse)."""
++        pct = msg.parse_buffering()
++        self._buffering = pct < 100
++        if self.playing:
++            self.gst.set_state(Gst.State.PAUSED if pct < 100 else Gst.State.PLAYING)
++
++    def wait_playback_idle(self):
++        """Hilo en segundo plano: espera (máx. 60 s) a que la reproducción no esté cargando."""
++        end = time.monotonic() + 60
++        while self._buffering and time.monotonic() < end:
++            time.sleep(0.5)
++
+     def on_gst_error(self, _bus, msg):
+         print("GStreamer:", msg.parse_error()[0])
+         self.playing = False
+@@ -332,10 +350,14 @@ class App(Gtk.Application):
+ 
+     def async_thumb(self, pic, url):
+         def work():
+-            d = youtube.download(url)
++            d = self._img_cache.get(url)
++            if d is None:
++                d = youtube.download(url)
++                if d:
++                    self._img_cache[url] = d
+             if d:
+                 GLib.idle_add(self._set_tex, pic, d)
+-        threading.Thread(target=work, daemon=True).start()
++        self._img_pool.submit(work)
+ 
+     def _set_tex(self, pic, data):
+         try:
+@@ -974,9 +996,10 @@ class App(Gtk.Application):
+             self.news_status[gid] = f"Buscando en YouTube… 0/{len(pending)}"
+ 
+             def work():
+-                with ThreadPoolExecutor(max_workers=3) as ex:  # map respeta el orden de las tendencias
+-                    for i, _ok in enumerate(ex.map(news.resolve, pending), 1):
+-                        GLib.idle_add(self._chart_progress, gid, i, len(pending))
++                # una búsqueda cada vez, con prioridad mínima y esperando si la música está cargando
++                for i, t in enumerate(pending, 1):
++                    news.resolve(t, self.wait_playback_idle)
++                    GLib.idle_add(self._chart_progress, gid, i, len(pending))
+             threading.Thread(target=work, daemon=True).start()
+         else:
+             self._news_busy.discard(gid)
+diff --git a/desktop/glassplayer/news.py b/desktop/glassplayer/news.py
+index 9024c4a..54e1344 100644
+--- a/desktop/glassplayer/news.py
++++ b/desktop/glassplayer/news.py
+@@ -108,7 +108,7 @@ def _from_deezer(d):
+     return {"uri": None, "title": d.get("title_short") or d.get("title") or "Sin título",
+             "artist": (d.get("artist") or {}).get("name") or "Artista desconocido",
+             "album": al.get("title") or "", "duration": d.get("duration") or 0, "cover": None,
+-            "thumb": al.get("cover_medium") or "", "cover_url": al.get("cover_xl") or al.get("cover_big") or "",
++            "thumb": al.get("cover_medium") or "", "cover_url": al.get("cover_big") or al.get("cover_xl") or "",
+             "dz_id": d.get("id")}
+ 
+ 
+@@ -146,12 +146,15 @@ def pick_match(results, duration):
+     return results[0]
+ 
+ 
+-def resolve(t):
+-    """Busca la canción en YouTube y rellena t['uri']. Devuelve True si la encontró."""
++def resolve(t, wait=None):
++    """Busca la canción en YouTube y rellena t['uri']. Devuelve True si la encontró.
++    wait: función opcional que espera mientras la reproducción esté cargando (no compite por la conexión)."""
+     if t.get("uri"):
+         return True
++    if wait:
++        wait()
+     try:
+-        hit = pick_match(youtube.search(f"{t['artist']} {t['title']}", n=5), t.get("duration"))
++        hit = pick_match(youtube.search(f"{t['artist']} {t['title']}", n=3, low_priority=True), t.get("duration"))
+     except Exception:
+         return False
+     if not hit:
+diff --git a/desktop/glassplayer/youtube.py b/desktop/glassplayer/youtube.py
+index 3460ce4..5f4f556 100644
+--- a/desktop/glassplayer/youtube.py
++++ b/desktop/glassplayer/youtube.py
+@@ -25,9 +25,11 @@ def download(url):
+         return None
+ 
+ 
+-def search(q, n=15):
+-    """Busca vídeos; devuelve pistas con el mismo formato que la biblioteca."""
+-    out = subprocess.run(["yt-dlp", "--flat-playlist", "--dump-json", "--no-warnings", f"ytsearch{n}:{q}"],
++def search(q, n=15, low_priority=False):
++    """Busca vídeos; devuelve pistas con el mismo formato que la biblioteca.
++    low_priority: se ejecuta con la mínima prioridad de CPU (búsquedas en segundo plano mientras suena música)."""
++    pre = ["nice", "-n", "19"] if low_priority and shutil.which("nice") else []
++    out = subprocess.run(pre + ["yt-dlp", "--flat-playlist", "--dump-json", "--no-warnings", f"ytsearch{n}:{q}"],
+                          capture_output=True, text=True, timeout=45, check=True)
+     res = []
+     for line in out.stdout.splitlines():
+-- 
+2.43.0
+

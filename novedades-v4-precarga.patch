@@ -1,0 +1,260 @@
+From be6edc01ed136ba4dfeeb7da9ecb472e41d6fc83 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 17 Nov 2026 20:01:23 +0000
+Subject: [PATCH] Reproduccion sin cortes: precarga la cancion entera antes de
+ sonar, descarga la siguiente mientras suena y deja las busquedas de Novedades
+ para despues
+
+---
+ desktop/README.md                 |  3 ++
+ desktop/glassplayer/app.py        | 77 ++++++++++++++++++++++-----
+ desktop/glassplayer/audiocache.py | 88 +++++++++++++++++++++++++++++++
+ 3 files changed, 156 insertions(+), 12 deletions(-)
+ create mode 100644 desktop/glassplayer/audiocache.py
+
+diff --git a/desktop/README.md b/desktop/README.md
+index 6f9f2d2..c6c8237 100644
+--- a/desktop/README.md
++++ b/desktop/README.md
+@@ -44,6 +44,9 @@ Todo ocurre en segundo plano y con tus permisos de usuario: la app toma el enlac
+ ## Novedades
+ En BIBLIOTECA → Novedades hay cajas de géneros musicales. Marca con la ★ los que te gusten (pasan arriba, a «Tus géneros»). Al abrir una caja salen las canciones en tendencia de ese género según Deezer (`api.deezer.com/chart/<género>/tracks`, público, sin API key); GlassPlayer las busca en YouTube y se van añadiendo a la lista según se encuentran. Se guardan de forma temporal en `news.json` (se refrescan cada 6 h y caducan a los 3 días); solo pasan a tu biblioteca si pulsas su corazón o las añades a una lista.
+ 
++## Reproducción sin cortes
++Al pulsar una canción de YouTube se descarga entera (se ve el porcentaje) y suena desde disco, así una conexión lenta no la corta a medias. Mientras suena se descarga ya la siguiente y se siguen cargando las novedades. Los audios son temporales (`~/.local/share/glassplayer/audio`, se conservan los últimos 40).
++
+ ## YouTube
+ Usa `yt-dlp`. Si deja de funcionar: `yt-dlp -U`. Las versiones recientes pueden pedir un runtime de JavaScript (deno o nodejs; el instalador pone nodejs); consulta la documentación de yt-dlp si te lo indica. Úsalo con contenido que tengas derecho a reproducir (p. ej. tu propio canal).
+ 
+diff --git a/desktop/glassplayer/app.py b/desktop/glassplayer/app.py
+index fd5a306..e841257 100755
+--- a/desktop/glassplayer/app.py
++++ b/desktop/glassplayer/app.py
+@@ -14,7 +14,7 @@ gi.require_version("Gst", "1.0")
+ gi.require_version("GdkPixbuf", "2.0")
+ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gst, Gtk, Pango
+ 
+-from . import downloader, library, news, settings, youtube
++from . import audiocache, downloader, library, news, settings, youtube
+ from .mpris import Mpris
+ from .style import build_css
+ 
+@@ -66,6 +66,7 @@ class App(Gtk.Application):
+         self._held = self._bg_hint = False  # segundo plano: la app se mantiene viva con la ventana oculta
+         self._token = 0
+         self._buffering = False  # GStreamer está rellenando el búfer: las tareas en segundo plano esperan
++        self._preload_token, self._prefetch_uri = None, None  # canción que se está precargando / siguiente ya en marcha
+         self._img_cache, self._img_pool = {}, ThreadPoolExecutor(max_workers=3)  # miniaturas: caché y hilos acotados
+         # estilo, modo móvil, descargas y bandeja
+         self.theme = settings.load()
+@@ -185,9 +186,10 @@ class App(Gtk.Application):
+             self.gst.set_state(Gst.State.PAUSED if pct < 100 else Gst.State.PLAYING)
+ 
+     def wait_playback_idle(self):
+-        """Hilo en segundo plano: espera (máx. 60 s) a que la reproducción no esté cargando."""
+-        end = time.monotonic() + 60
+-        while self._buffering and time.monotonic() < end:
++        """Hilo en segundo plano: espera (máx. 90 s) a que la canción que se pulsó esté cargada y sonando:
++        primero la canción, después el resto."""
++        end = time.monotonic() + 90
++        while (self._buffering or self._preload_token is not None) and time.monotonic() < end:
+             time.sleep(0.5)
+ 
+     def on_gst_error(self, _bus, msg):
+@@ -1094,9 +1096,11 @@ class App(Gtk.Application):
+         library.push_recent(self.lib, t)  # «Recientes»: la lista visible no se recoloca hasta volver a entrar
+         library.save(self.lib)
+         self.gst.set_state(Gst.State.NULL)
++        self._buffering = False
++        self._preload_token = self._token if youtube.is_yt(t["uri"]) else None  # las búsquedas de fondo esperan
+         self.show_track()
+         if youtube.is_yt(t["uri"]):
+-            self.set_subtitle("Cargando desde YouTube…")
++            self.set_subtitle("Cargando canción… 0 %")
+             threading.Thread(target=self._resolve, args=(t, self._token), daemon=True).start()
+         else:
+             self._start(t["uri"])
+@@ -1106,19 +1110,61 @@ class App(Gtk.Application):
+         self.gst.set_state(Gst.State.PLAYING)
+ 
+     def _resolve(self, t, token):
+-        """Hilo: obtiene la URL de audio y, si falta, la portada (miniatura del vídeo)."""
++        """Hilo: descarga la canción ENTERA (con progreso) y solo entonces empieza a sonar, desde disco: sin cortes
++        aunque la conexión falle después. Si la descarga falla, plan B: streaming directo como antes."""
++        self._preload_token = token
++        play = None
+         try:
+-            url = youtube.stream_url(t["uri"])
++            play = GLib.filename_to_uri(audiocache.fetch(
++                t["uri"], on_progress=lambda p: GLib.idle_add(self._load_progress, token, p),
++                cancel=lambda: token != self._token))
++        except audiocache.Cancelled:
++            return  # el usuario cambió de canción: la nueva se encarga
+         except Exception:
+-            url = None
+-        path = None
+-        if url and not t.get("cover"):
++            if token == self._token:
++                try:
++                    play = youtube.stream_url(t["uri"])
++                except Exception:
++                    play = None
++        finally:
++            if self._preload_token == token:
++                self._preload_token = None
++        GLib.idle_add(self._resolved, t, token, play)
++        if play and not t.get("cover"):  # la portada llega después: no retrasa el inicio de la canción
+             data = youtube.download(t["cover_url"]) if t.get("cover_url") else None  # portada HD de Deezer
+             data = data or youtube.thumbnail(t["uri"])
+             path = library.save_cover(data) if data else None
+-        GLib.idle_add(self._resolved, t, token, url, path)
++            if path:
++                GLib.idle_add(self._cover_ready, t, path)
++
++    def _load_progress(self, token, pct):
++        if token == self._token:
++            self.set_subtitle(f"Cargando canción… {pct:.0f} %")
++
++    def prefetch_next(self):
++        """Mientras suena la actual, descarga ya la siguiente (cola o lista) para que el cambio sea instantáneo."""
++        if self.up_next:
++            nxt = self.up_next[0]
++        elif self.queue:
++            nxt = self.queue[(self.idx + 1) % len(self.queue)]
++        else:
++            return
++        uri = nxt["uri"]
++        if not youtube.is_yt(uri) or self._prefetch_uri == uri or audiocache.cached(uri):
++            return
++        self._prefetch_uri, token = uri, self._token
+ 
+-    def _resolved(self, t, token, url, path):
++        def work():
++            try:
++                audiocache.fetch(uri, low_priority=True, cancel=lambda: token != self._token)
++            except Exception:
++                pass
++            finally:
++                if self._prefetch_uri == uri:
++                    self._prefetch_uri = None
++        threading.Thread(target=work, daemon=True).start()
++
++    def _cover_ready(self, t, path):
+         if path and not t.get("cover"):
+             t["cover"] = path
+             for x in self.lib["tracks"]:
+@@ -1131,10 +1177,17 @@ class App(Gtk.Application):
+                 if r["uri"] == t["uri"]:
+                     self.set_pic(r["th"], path, 40)
+             library.save(self.lib)
++            if self.current() is t:
++                self.set_pic(self.t_cover, path, 54)
++                self.update_bg()
++                self.update_phone()
++
++    def _resolved(self, t, token, url):
+         if token != self._token:
+             return
+         if url:
+             self._start(url)
++            self.prefetch_next()
+         else:
+             self.playing = False
+         self.show_track()
+diff --git a/desktop/glassplayer/audiocache.py b/desktop/glassplayer/audiocache.py
+new file mode 100644
+index 0000000..d154e79
+--- /dev/null
++++ b/desktop/glassplayer/audiocache.py
+@@ -0,0 +1,88 @@
++"""Caché de audio: la canción de YouTube se descarga ENTERA antes de empezar a sonar y se reproduce desde disco,
++así que una conexión lenta o inestable ya no puede cortar la reproducción a media canción.
++
++Son archivos temporales (~/.local/share/glassplayer/audio): se conservan los últimos MAX_FILES para que repetir o
++volver a una canción sea instantáneo, y el resto se borra solo. No son descargas de la biblioteca (para eso está el
++botón «Descargar», que genera MP3 etiquetados).
++"""
++import glob
++import os
++import re
++import shutil
++import subprocess
++import threading
++
++from . import youtube
++
++DATA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "glassplayer")
++DIR = os.path.join(DATA, "audio")
++MAX_FILES = 40
++TIMEOUT = 300  # segundos máximos para una descarga
++_PCT = re.compile(r"\[download\]\s+(\d+(?:\.\d+)?)%")
++_TEMP = (".part", ".ytdl", ".temp")
++
++
++class Cancelled(Exception):
++    """La descarga se abandonó porque ya no hace falta (el usuario cambió de canción)."""
++
++
++def _vid(uri):
++    return uri[len(youtube.WATCH):]
++
++
++def cached(uri):
++    """Ruta del audio ya descargado (completo) o None."""
++    for p in glob.glob(os.path.join(glob.escape(DIR), glob.escape(_vid(uri)) + ".*")):
++        if ".part" not in os.path.basename(p) and not p.endswith(_TEMP) and os.path.getsize(p) > 0:
++            return p
++    return None
++
++
++def fetch(uri, on_progress=None, cancel=None, low_priority=False):
++    """Descarga la canción completa (si no está ya) y devuelve la ruta del archivo.
++    on_progress(porcentaje) se llama durante la descarga; cancel() -> True aborta con Cancelled."""
++    hit = cached(uri)
++    if hit:
++        os.utime(hit)  # la marca como la más reciente para que trim() no la borre
++        return hit
++    if not youtube.available():
++        raise RuntimeError("yt-dlp no está instalado")
++    os.makedirs(DIR, exist_ok=True)
++    pre = ["nice", "-n", "19"] if low_priority and shutil.which("nice") else []
++    cmd = pre + ["yt-dlp", "-f", "bestaudio/best", "--no-playlist", "--no-warnings", "--newline", "--progress",
++                 "-o", os.path.join(DIR, "%(id)s.%(ext)s"), uri]
++    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
++    watchdog = threading.Timer(TIMEOUT, proc.kill)
++    watchdog.start()
++    try:
++        for line in proc.stdout:
++            if cancel and cancel():
++                proc.kill()
++                raise Cancelled()
++            m = _PCT.search(line)
++            if m and on_progress:
++                on_progress(float(m.group(1)))
++        rc = proc.wait()
++    finally:
++        watchdog.cancel()
++        if proc.poll() is None:
++            proc.kill()
++    path = cached(uri)
++    if rc != 0 or not path:
++        raise RuntimeError("no se pudo descargar el audio")
++    trim()
++    return path
++
++
++def trim(keep=MAX_FILES):
++    """Borra los archivos más antiguos de la caché, dejando los `keep` más recientes."""
++    try:
++        files = sorted((os.path.join(DIR, f) for f in os.listdir(DIR)), key=os.path.getmtime, reverse=True)
++        for p in files[keep:]:
++            os.remove(p)
++    except OSError:
++        pass
++
++
++def clear():
++    shutil.rmtree(DIR, ignore_errors=True)
+-- 
+2.43.0
+

@@ -1,0 +1,113 @@
+From e77988398f03bff7680bd74ef58deb15e72feb1b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 24 Nov 2026 10:22:32 +0000
+Subject: [PATCH] Aleatorio como interruptor: se mantiene activo hasta volver a
+ pulsarlo
+
+---
+ desktop/glassplayer/app.py   | 48 +++++++++++++++++++++++++++---------
+ desktop/glassplayer/style.py |  1 +
+ 2 files changed, 37 insertions(+), 12 deletions(-)
+
+diff --git a/desktop/glassplayer/app.py b/desktop/glassplayer/app.py
+index e8142ea..fbe487c 100755
+--- a/desktop/glassplayer/app.py
++++ b/desktop/glassplayer/app.py
+@@ -67,7 +67,9 @@ class App(Gtk.Application):
+         self._held = self._bg_hint = False  # segundo plano: la app se mantiene viva con la ventana oculta
+         self._token = 0
+         self._buffering = False  # GStreamer está rellenando el búfer: las tareas en segundo plano esperan
+-        self._shuffled = False  # la cola actual viene del botón «Aleatorio»
++        self.shuffle_on = False  # interruptor «Aleatorio» (listas creadas por el usuario)
++        self._shuffled = False   # la cola actual está barajada
++        self._orig_queue = []    # la cola en su orden original, para volver a él al desactivar
+         self._preload_token, self._prefetch_uri = None, None  # canción que se está precargando / siguiente ya en marcha
+         self._img_cache, self._img_pool = {}, ThreadPoolExecutor(max_workers=3)  # miniaturas: caché y hilos acotados
+         # estilo, modo móvil, descargas y bandeja
+@@ -249,7 +251,8 @@ class App(Gtk.Application):
+         titles.append(self.l_page)
+         self.btn_all = button("btn-primary", self.play_all, text="▶  Reproducir")
+         self.btn_all.set_valign(CENTER)
+-        self.btn_shuffle = button("btn-ghost", self.play_shuffled, text="🔀  Aleatorio")
++        self.btn_shuffle = button("btn-ghost", self.toggle_shuffle, text="🔀  Aleatorio",
++                                  tip="Reproducir la lista en orden aleatorio (pulsa de nuevo para desactivarlo)")
+         self.btn_shuffle.set_valign(CENTER)
+         self.btn_dl = button("btn-ghost", self.download_view, text="⬇  Descargar")
+         self.btn_dl.set_valign(CENTER)
+@@ -477,6 +480,7 @@ class App(Gtk.Application):
+         self.btn_clear.set_visible(self.view == "queue" and bool(self.up_next))
+         self.btn_add.set_visible(self.view.startswith("pl:"))  # solo dentro de una lista creada
+         self.btn_shuffle.set_visible(self.view.startswith("pl:") and len(tr) > 1)  # aleatorio: solo en listas creadas
++        (self.btn_shuffle.add_css_class if self.shuffle_on else self.btn_shuffle.remove_css_class)("on")
+         self.l_qcount.set_label(str(len(self.up_next)) if self.up_next else "")
+         todo = [t for t in tr if self.dl_state(t) == "todo"]
+         self.btn_dl.set_visible(bool(todo))
+@@ -1081,23 +1085,43 @@ class App(Gtk.Application):
+         return pos // 1000 if ok else 0
+ 
+     def play_list(self, tracks, i):
+-        self.queue = list(tracks)
+-        self._shuffled = False  # reproducción normal: respeta el orden de la lista
++        self._orig_queue = list(tracks)
++        # con «Aleatorio» activo, en una lista creada: la pulsada va primero y el resto se baraja
++        self._shuffled = self.shuffle_on and self.view.startswith("pl:") and len(tracks) > 1
++        if self._shuffled:
++            rest = [t for k, t in enumerate(tracks) if k != i]
++            random.shuffle(rest)
++            self.queue, i = [tracks[i]] + rest, 0
++        else:
++            self.queue = list(tracks)
+         self.play_index(i)
+ 
+-    def play_shuffled(self):
+-        """Reproduce la lista visible en orden aleatorio: todas las canciones una vez, sin repetir."""
++    def toggle_shuffle(self):
++        """Interruptor «Aleatorio»: al activarlo baraja la lista y la reproduce; al desactivarlo vuelve al orden
++        original sin cortar la canción que está sonando."""
++        self.shuffle_on = not self.shuffle_on
+         tr = list(self.view_tracks())
+-        if not tr:
+-            return
+-        random.shuffle(tr)
+-        self.play_list(tr, 0)
+-        self._shuffled = True  # al llegar al final se vuelve a barajar en vez de repetir el mismo orden
++        cur = self._cur
++        pos = next((k for k, t in enumerate(tr) if cur and t["uri"] == cur["uri"]), None)
++        if self.shuffle_on and tr:
++            if pos is not None:  # ya hay una de esta lista cargada: sigue con ella y baraja el resto
++                self.queue = [tr[pos]] + random.sample(tr[:pos] + tr[pos + 1:], len(tr) - 1)
++                self.idx, self._orig_queue, self._shuffled = 0, tr, True
++            else:  # empieza por una al azar
++                self.play_list(tr, random.randrange(len(tr)))
++        elif not self.shuffle_on and self._shuffled:
++            orig = self._orig_queue
++            self.queue, self._shuffled = list(orig), False
++            here = next((k for k, t in enumerate(orig) if cur and t["uri"] == cur["uri"]), None)
++            if here is not None:
++                self.idx = here  # la siguiente es la que sigue a la actual en el orden original
++        self.render_main()
+ 
+     def play_all(self):
+         tr = self.view_tracks()
+         if tr:
+-            self.play_list(tr, 0)
++            shuffle = self.shuffle_on and self.view.startswith("pl:")
++            self.play_list(tr, random.randrange(len(tr)) if shuffle else 0)
+ 
+     def play_index(self, i):
+         if not (0 <= i < len(self.queue)):
+diff --git a/desktop/glassplayer/style.py b/desktop/glassplayer/style.py
+index 3642ca5..9f2aa7d 100644
+--- a/desktop/glassplayer/style.py
++++ b/desktop/glassplayer/style.py
+@@ -67,6 +67,7 @@ button.btn-primary {
+ }
+ button.btn-ghost { background: rgba(0,0,0,0.28); background-image: none; color: #fff; border: 1px solid rgba(255,255,255,0.32); border-radius: 999px; padding: 9px 18px; font-weight: 600; }
+ button.btn-ghost:hover { background: rgba(0,0,0,0.42); }
++button.btn-ghost.on, button.btn-ghost.on:hover { background: $accent; background-image: none; border-color: $accent; }
+ button.ibtn, button.heart, button.cbtn {
+   background: transparent; background-image: none; border: none; box-shadow: none;
+   color: rgba($text_rgb,0.55); border-radius: 8px;
+-- 
+2.43.0
+
