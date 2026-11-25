@@ -1,7 +1,0 @@
-__pycache__/
-*.pyc
-build/
-dist/
-installer_output/
-tools/
-tests/out/

@@ -1,0 +1,43 @@
+# Genera GlassPlayer.exe para Windows en la nube
+# Copia este archivo en .github/workflows/windows-build.yml de tu repo.
+name: GlassPlayer para Windows
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exe:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-glib2
+            mingw-w64-ucrt-x86_64-gstreamer
+            mingw-w64-ucrt-x86_64-gst-plugins-base
+            mingw-w64-ucrt-x86_64-gst-plugins-good
+            mingw-w64-ucrt-x86_64-gst-plugins-ugly
+            mingw-w64-ucrt-x86_64-gst-libav
+            mingw-w64-ucrt-x86_64-gdk-pixbuf2
+            mingw-w64-ucrt-x86_64-ffmpeg
+      - name: Parche multiplataforma
+        run: python windows/patch_compat.py
+      - name: yt-dlp standalone (.exe, sin Python)
+        run: curl -fL -o yt-dlp.exe https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
+      - name: Construir
+        run: python windows/build.py
+      - name: Subir artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: GlassPlayer-Windows
+          path: dist-windows/
+          compression-level: 6

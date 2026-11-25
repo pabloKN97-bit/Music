@@ -1,4 +1,0 @@
-# Dependencias de la aplicación (Windows / Linux / macOS)
-PySide6-Essentials>=6.7
-PySide6-Addons>=6.7
-mutagen>=1.47
