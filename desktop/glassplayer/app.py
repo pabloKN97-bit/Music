@@ -129,16 +129,14 @@ class App(Gtk.Application):
         Gtk.Application.do_shutdown(self)
 
     def on_close(self, win):
-        """Cerrar la ventana (la X) con música sonando NO sale de la app: la oculta y la música sigue
-        (controles en la barra superior, en el panel del sistema y en la pantalla de bloqueo). Sin música,
-        se cierra la aplicación. Para salir del todo estando sonando: botón «Salir», Ctrl+Q o «Salir» del icono."""
-        if self.playing:
-            self.keep_alive(True)  # sin esto algunas versiones de GTK terminan el proceso al quedar sin ventanas visibles
-            win.set_visible(False)
-            self.background_hint()
-            return True
-        self.quit()  # hay dos ventanas posibles (escritorio y móvil): cerrar una cierra la app
-        return False
+	 if self._save_id:
+		GLib.source_remove(self._save_id)
+		self._save_id = 0
+		settings.save(self.theme)
+	    self.gst.set_state(Gst.State.NULL)
+	    downloader.stop_server()
+	    subprocess.Popen(["pkill", "-f", "glassplayer"])
+	    return True
 
     def keep_alive(self, on):
         """Mantiene (o suelta) la aplicación viva aunque no haya ninguna ventana visible."""
