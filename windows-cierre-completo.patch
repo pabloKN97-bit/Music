@@ -1,0 +1,90 @@
+From ee6310b70cf4c4ebc60f371867fd34862b9c0def Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 10:41:37 +0000
+Subject: [PATCH] Windows: la X cierra la app del todo (guarda ajustes, para
+ audio, mata yt-dlp/ffmpeg, quita la bandeja), equivalente al pkill de Linux
+
+---
+ Windows/deskop-Windows/glassplayer/tools.py  | 24 +++++++++++++++++++-
+ Windows/deskop-Windows/glassplayer/window.py | 10 ++++++--
+ 2 files changed, 31 insertions(+), 3 deletions(-)
+
+diff --git a/Windows/deskop-Windows/glassplayer/tools.py b/Windows/deskop-Windows/glassplayer/tools.py
+index 0e61c8a..387479c 100644
+--- a/Windows/deskop-Windows/glassplayer/tools.py
++++ b/Windows/deskop-Windows/glassplayer/tools.py
+@@ -54,9 +54,31 @@ def run(cmd, low=False, **kw):
+     return subprocess.run(cmd, **kw)
+ 
+ 
++_children = set()  # procesos hijos vivos (yt-dlp, ffmpeg...) para poder cerrarlos al salir de la app
++
++
+ def popen(cmd, low=False, **kw):
+     cmd, kw = _prepare(cmd, kw, low)
+-    return subprocess.Popen(cmd, **kw)
++    p = subprocess.Popen(cmd, **kw)
++    _children.add(p)
++    for q in [q for q in _children if q.poll() is not None]:
++        _children.discard(q)
++    return p
++
++
++def kill_children():
++    """Equivalente en Windows al «pkill -f glassplayer» de Linux: termina yt-dlp/ffmpeg y sus subprocesos."""
++    for p in list(_children):
++        if p.poll() is None:
++            try:
++                if os.name == "nt":
++                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], creationflags=NO_WINDOW,
++                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
++                else:
++                    p.kill()
++            except (OSError, subprocess.SubprocessError):
++                pass
++    _children.clear()
+ 
+ 
+ def update_ytdlp_async(max_age=24 * 3600):
+diff --git a/Windows/deskop-Windows/glassplayer/window.py b/Windows/deskop-Windows/glassplayer/window.py
+index 83cb447..cf58abc 100644
+--- a/Windows/deskop-Windows/glassplayer/window.py
++++ b/Windows/deskop-Windows/glassplayer/window.py
+@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QApplication, QColorDialog, QDialog, QFileDialog,
+                                QMenu, QMessageBox, QScrollArea, QSlider, QStackedWidget, QSystemTrayIcon,
+                                QVBoxLayout, QWidget)
+ 
+-from . import audiocache, downloader, library, news, paths, settings, style, youtube
++from . import audiocache, downloader, library, news, paths, settings, style, tools, youtube
+ from .player import Player
+ from .widgets import Bus, GenreTile, Images, TrackRow, make_button, set_prop
+ 
+@@ -259,7 +259,7 @@ class MainWindow(QMainWindow):
+         menu = QMenu(self)
+         for text, fn in (("Mostrar GlassPlayer", self.show_window), ("Reproducir / pausa", self.toggle),
+                          ("Siguiente", self.go_next), ("Anterior", self.go_prev),
+-                         ("Salir", QApplication.instance().quit)):
++                         ("Salir", self.close)):
+             act = QAction(text, self)
+             act.triggered.connect(lambda _=False, f=fn: f())
+             menu.addAction(act)
+@@ -277,10 +277,16 @@ class MainWindow(QMainWindow):
+         QApplication.instance().setStyleSheet(style.build_qss(self.theme))
+ 
+     def closeEvent(self, e):
++        """La X cierra la aplicación del todo (como en Linux): guarda ajustes, para el audio, mata yt-dlp/ffmpeg,
++        quita el icono de la bandeja y termina el proceso para que no quede nada ni en la barra de tareas."""
++        settings.save(self.theme)
+         self.player.stop()
++        tools.kill_children()
+         if self.tray:
+             self.tray.hide()
+         super().closeEvent(e)
++        QApplication.instance().quit()
++        QTimer.singleShot(1500, lambda: os._exit(0))  # por si algún hilo impidiera salir
+ 
+     def resizeEvent(self, e):
+         super().resizeEvent(e)
+-- 
+2.43.0
+

@@ -1,19 +1,25 @@
-# Copia este archivo a  .github/workflows/build-windows.yml  en la raíz del repositorio.
-# Cada vez que cambies algo en deskop-Windows (o pulses «Run workflow») GitHub construye el instalador.
+# Construye el .exe con GitHub Actions.
+# Cada vez que cambies algo en deskop-Windows (o pulses «Run workflow») GitHub construye el instalador (se crea el .exe solo).
 name: Build Windows installer
 
 on:
   workflow_dispatch:
   push:
+    branches: [Windows]
+    tags: ["windows-v*"]   # un tag windows-v1.0 publica además una Release con el instalador
     paths:
-      - "deskop-Windows/**"
+      - "Windows/deskop-Windows/**"
+      - ".github/workflows/build-windows.yml"
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: deskop-Windows
+        working-directory: Windows/deskop-Windows
     steps:
       - uses: actions/checkout@v4
 
@@ -21,7 +27,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: deskop-Windows/requirements-build.txt
+          cache-dependency-path: Windows/deskop-Windows/requirements-build.txt
 
       - name: Instalar dependencias
         run: python -m pip install -r requirements-build.txt
@@ -54,4 +60,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: GlassPlayer-Windows-Setup
-          path: deskop-Windows/installer_output/GlassPlayer-Setup.exe
+          path: Windows/deskop-Windows/installer_output/GlassPlayer-Setup.exe
+
+      - name: Publicar Release (solo con tag windows-v*)
+        if: startsWith(github.ref, 'refs/tags/windows-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: GlassPlayer para Windows ${{ github.ref_name }}
+          files: Windows/deskop-Windows/installer_output/GlassPlayer-Setup.exe
