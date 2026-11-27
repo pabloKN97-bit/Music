@@ -54,9 +54,31 @@ def run(cmd, low=False, **kw):
     return subprocess.run(cmd, **kw)
 
 
+_children = set()  # procesos hijos vivos (yt-dlp, ffmpeg...) para poder cerrarlos al salir de la app
+
+
 def popen(cmd, low=False, **kw):
     cmd, kw = _prepare(cmd, kw, low)
-    return subprocess.Popen(cmd, **kw)
+    p = subprocess.Popen(cmd, **kw)
+    _children.add(p)
+    for q in [q for q in _children if q.poll() is not None]:
+        _children.discard(q)
+    return p
+
+
+def kill_children():
+    """Equivalente en Windows al «pkill -f glassplayer» de Linux: termina yt-dlp/ffmpeg y sus subprocesos."""
+    for p in list(_children):
+        if p.poll() is None:
+            try:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], creationflags=NO_WINDOW,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+                else:
+                    p.kill()
+            except (OSError, subprocess.SubprocessError):
+                pass
+    _children.clear()
 
 
 def update_ytdlp_async(max_age=24 * 3600):

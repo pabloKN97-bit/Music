@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QApplication, QColorDialog, QDialog, QFileDialog,
                                QMenu, QMessageBox, QScrollArea, QSlider, QStackedWidget, QSystemTrayIcon,
                                QVBoxLayout, QWidget)
 
-from . import audiocache, downloader, library, news, paths, settings, style, youtube
+from . import audiocache, downloader, library, news, paths, settings, style, tools, youtube
 from .player import Player
 from .widgets import Bus, GenreTile, Images, TrackRow, make_button, set_prop
 
@@ -259,7 +259,7 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         for text, fn in (("Mostrar GlassPlayer", self.show_window), ("Reproducir / pausa", self.toggle),
                          ("Siguiente", self.go_next), ("Anterior", self.go_prev),
-                         ("Salir", QApplication.instance().quit)):
+                         ("Salir", self.close)):
             act = QAction(text, self)
             act.triggered.connect(lambda _=False, f=fn: f())
             menu.addAction(act)
@@ -277,10 +277,16 @@ class MainWindow(QMainWindow):
         QApplication.instance().setStyleSheet(style.build_qss(self.theme))
 
     def closeEvent(self, e):
+        """La X cierra la aplicación del todo (como en Linux): guarda ajustes, para el audio, mata yt-dlp/ffmpeg,
+        quita el icono de la bandeja y termina el proceso para que no quede nada ni en la barra de tareas."""
+        settings.save(self.theme)
         self.player.stop()
+        tools.kill_children()
         if self.tray:
             self.tray.hide()
         super().closeEvent(e)
+        QApplication.instance().quit()
+        QTimer.singleShot(1500, lambda: os._exit(0))  # por si algún hilo impidiera salir
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
